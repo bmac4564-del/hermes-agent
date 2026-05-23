@@ -52,6 +52,47 @@ List the files in /home/user/projects and summarize the repo structure.
 
 Hermes will discover the MCP server's tools and use them like any other tool.
 
+## Catalog: one-click install for Nous-approved MCPs
+
+Hermes ships a curated catalog of MCP servers that Nous staff has reviewed
+and merged. They're disabled by default — install only what you actually
+want.
+
+```bash
+hermes mcp                # interactive picker (default)
+hermes mcp catalog        # plain-text list, scriptable
+hermes mcp install n8n    # install a catalog entry by name
+```
+
+The picker shows each entry with its current status:
+
+```
+n8n          available              Manage and inspect n8n workflows from Hermes
+linear       enabled                Linear issue/project management (remote OAuth)
+github       installed (disabled)   GitHub repo + PR tools
+```
+
+Hit `Enter` on a row to install (and walk through any required credentials),
+enable, disable, or uninstall. Catalog entries are stored under
+`optional-mcps/` in the hermes-agent repo — presence in that directory means
+Nous approval. There is no community submission tier; entries are added by
+merging a PR.
+
+Catalog entries can require:
+
+- **API key** — Hermes prompts at install time and writes the value to
+  `~/.hermes/.env`. Non-secret values (base URLs) go to the same file.
+- **OAuth** (remote MCP) — written as `auth: oauth` in your config; the MCP
+  client opens a browser on first connection.
+- **OAuth** (third-party provider like Google/GitHub) — Hermes points you at
+  `hermes auth <provider>` if you haven't authenticated already.
+
+MCPs are never auto-updated. Re-run `hermes mcp install <name>` to refresh
+after a Hermes update if a manifest version changed.
+
+To add an MCP to the catalog, open a PR against
+[`optional-mcps/`](https://github.com/NousResearch/hermes-agent/tree/main/optional-mcps).
+
 ## Two kinds of MCP servers
 
 ### Stdio servers
