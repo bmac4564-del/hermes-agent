@@ -32,7 +32,7 @@ class TestEarlyMouseDisable:
         monkeypatch.delenv("HERMES_TUI", raising=False)
         monkeypatch.delenv("HERMES_TUI_NO_EARLY_DISABLE", raising=False)
 
-        with patch("os.write") as mock_write:
+        with patch("os.isatty", return_value=True), patch("os.write") as mock_write:
             _suppress_mouse_residue_early()
 
         mock_write.assert_called_once_with(1, EXPECTED)
@@ -42,7 +42,7 @@ class TestEarlyMouseDisable:
         monkeypatch.setenv("HERMES_TUI", "1")
         monkeypatch.delenv("HERMES_TUI_NO_EARLY_DISABLE", raising=False)
 
-        with patch("os.write") as mock_write:
+        with patch("os.isatty", return_value=True), patch("os.write") as mock_write:
             _suppress_mouse_residue_early()
 
         mock_write.assert_called_once_with(1, EXPECTED)
@@ -67,6 +67,18 @@ class TestEarlyMouseDisable:
 
         mock_write.assert_not_called()
 
+    def test_skips_when_stdout_is_not_a_tty(self, monkeypatch):
+        # `hermes --tui … >log` or CI capture: pipe is fd 1, not a TTY. The
+        # bytes can't reach a terminal and would just pollute the log.
+        monkeypatch.setattr(sys, "argv", ["hermes", "--tui"])
+        monkeypatch.delenv("HERMES_TUI", raising=False)
+        monkeypatch.delenv("HERMES_TUI_NO_EARLY_DISABLE", raising=False)
+
+        with patch("os.isatty", return_value=False), patch("os.write") as mock_write:
+            _suppress_mouse_residue_early()
+
+        mock_write.assert_not_called()
+
     def test_oserror_is_swallowed(self, monkeypatch):
         monkeypatch.setattr(sys, "argv", ["hermes", "--tui"])
         monkeypatch.delenv("HERMES_TUI", raising=False)
@@ -75,6 +87,6 @@ class TestEarlyMouseDisable:
         def boom(*_a, **_k):
             raise OSError("stdout closed")
 
-        with patch("os.write", side_effect=boom):
+        with patch("os.isatty", return_value=True), patch("os.write", side_effect=boom):
             # Must not propagate — startup hot path can never break.
             _suppress_mouse_residue_early()

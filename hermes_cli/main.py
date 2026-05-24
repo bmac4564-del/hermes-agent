@@ -78,6 +78,11 @@ def _suppress_mouse_residue_early() -> None:
     if not (os.environ.get("HERMES_TUI") == "1" or "--tui" in sys.argv[1:]):
         return
     try:
+        # Skip when stdout is redirected (`hermes --tui … >log`, CI capture):
+        # the bytes can't reach the terminal anyway and would just pollute
+        # the log with raw CSI.
+        if not os.isatty(1):
+            return
         # Disable every mouse-tracking variant we know about. Idempotent and
         # safe to send even when no tracking is currently asserted.
         os.write(
