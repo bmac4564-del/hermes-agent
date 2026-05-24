@@ -13,7 +13,7 @@ def test_parse_paths_env_redacts_secret_values(tmp_path):
         "\n".join(
             [
                 f'export HERMES_KANBAN_AGENT_DIR="{target}"',
-                "GITHUB_" + "TOKEN" + "=" + redacted_value,
+                ("GITHUB_" + "TOKEN") + "=" + redacted_value,
                 "PLAIN_FLAG=enabled",
             ]
         ),
