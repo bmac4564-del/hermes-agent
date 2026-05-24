@@ -1174,10 +1174,8 @@ def connect(
     ):
         real_home = Path.home()
         hermes_home = os.environ.get("HERMES_HOME", "").strip()
-        is_isolated = (
-            _path_is_under_system_temp(real_home)
-            or (bool(hermes_home) and _path_is_under_system_temp(hermes_home))
-        )
+        effective_root: str | Path = hermes_home if hermes_home else real_home
+        is_isolated = _path_is_under_system_temp(effective_root)
         if not is_isolated:
             raise RuntimeError(
                 "kanban.connect() called from a pytest session without any of "

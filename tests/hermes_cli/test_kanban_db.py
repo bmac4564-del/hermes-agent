@@ -77,6 +77,22 @@ def test_connect_rejects_false_temp_prefix_under_pytest(monkeypatch):
         kb.connect()
 
 
+def test_connect_rejects_non_temp_hermes_home_even_when_path_home_is_temp(tmp_path, monkeypatch):
+    monkeypatch.delenv("HERMES_KANBAN_HOME", raising=False)
+    monkeypatch.delenv("HERMES_KANBAN_DB", raising=False)
+    monkeypatch.delenv("HERMES_KANBAN_BOARD", raising=False)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("HERMES_HOME", "/home/test-user/.hermes")
+
+    def fail_if_connect_tries_to_create(_self, *args, **kwargs):
+        raise AssertionError("connect() should fail before creating directories")
+
+    monkeypatch.setattr(Path, "mkdir", fail_if_connect_tries_to_create)
+
+    with pytest.raises(RuntimeError, match="without any of HERMES_KANBAN_HOME"):
+        kb.connect()
+
+
 def test_connect_allows_explicit_db_path_under_pytest(tmp_path, monkeypatch):
     monkeypatch.delenv("HERMES_KANBAN_HOME", raising=False)
     monkeypatch.delenv("HERMES_KANBAN_DB", raising=False)

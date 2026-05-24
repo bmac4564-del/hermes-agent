@@ -533,11 +533,16 @@ class TestLaunchdServiceRecovery:
 
         label = gateway_cli.get_launchd_label()
         domain = gateway_cli._launchd_domain()
-        assert "--replace" in plist_path.read_text(encoding="utf-8")
+        assert "--replace" not in plist_path.read_text(encoding="utf-8")
         assert calls[:2] == [
             ["launchctl", "bootout", f"{domain}/{label}"],
             ["launchctl", "bootstrap", domain, str(plist_path)],
         ]
+
+    def test_launchd_and_profile_run_args_do_not_replace_running_gateways(self):
+        assert "--replace" not in gateway_cli.generate_launchd_plist()
+        assert "--replace" not in gateway_cli._gateway_run_args_for_profile("default")
+        assert "--replace" not in gateway_cli._gateway_run_args_for_profile("worker")
 
     def test_launchd_start_reloads_unloaded_job_and_retries(self, tmp_path, monkeypatch):
         plist_path = tmp_path / "ai.hermes.gateway.plist"
