@@ -211,11 +211,34 @@ def _build_pid_record() -> dict:
     }
 
 
+def _build_runtime_import_authority() -> dict[str, Any]:
+    try:
+        import hermes_cli
+
+        hermes_cli_file = str(Path(hermes_cli.__file__).resolve())
+    except Exception:
+        hermes_cli_file = None
+
+    hermes_home = get_hermes_home()
+    return {
+        "python_executable": sys.executable,
+        "cwd": os.getcwd(),
+        "sys_path0": sys.path[0] if sys.path else None,
+        "gateway_file": str(Path(__file__).resolve()),
+        "hermes_cli_file": hermes_cli_file,
+        "project_root": str(Path(__file__).resolve().parents[1]),
+        "hermes_home": str(hermes_home),
+        "config_path": str(hermes_home / "config.yaml"),
+        "env_path": str(hermes_home / ".env"),
+    }
+
+
 def _build_runtime_status_record() -> dict[str, Any]:
     payload = _build_pid_record()
     payload.update({
         "gateway_status_schema_version": _RUNTIME_STATUS_SCHEMA_VERSION,
         "gateway_state": "starting",
+        "runtime_import_authority": _build_runtime_import_authority(),
         "exit_reason": None,
         "restart_requested": False,
         "active_agents": 0,
@@ -567,6 +590,7 @@ def write_runtime_status(
     payload["pid"] = current_record["pid"]
     payload["argv"] = current_record["argv"]
     payload["start_time"] = current_record["start_time"]
+    payload["runtime_import_authority"] = _build_runtime_import_authority()
     payload["updated_at"] = _utc_now_iso()
 
     if gateway_state is not _UNSET:

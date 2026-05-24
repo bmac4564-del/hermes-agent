@@ -301,6 +301,61 @@ class TestGatewayRuntimeStatus:
         assert payload["work_active"] is False
         assert payload["run_lifecycle_count"] == 0
 
+    def test_write_runtime_status_records_import_authority(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setattr(status.sys, "executable", "/rescue/.venv/bin/python")
+        monkeypatch.setattr(status.os, "getcwd", lambda: "/rescue")
+
+        status.write_runtime_status(gateway_state="running")
+
+        payload = status.read_runtime_status()
+        authority = payload["runtime_import_authority"]
+        assert authority["python_executable"] == "/rescue/.venv/bin/python"
+        assert authority["cwd"] == "/rescue"
+        assert authority["sys_path0"] is not None
+        assert authority["gateway_file"].endswith("gateway/status.py")
+        assert authority["hermes_cli_file"].endswith("hermes_cli/__init__.py")
+        assert Path(authority["project_root"]) == Path(status.__file__).resolve().parents[1]
+        assert authority["hermes_home"] == str(tmp_path)
+        assert authority["config_path"] == str(tmp_path / "config.yaml")
+        assert authority["env_path"] == str(tmp_path / ".env")
+
+    def test_write_runtime_status_overwrites_stale_import_authority_on_restart(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        state_path = tmp_path / "gateway_state.json"
+        state_path.write_text(json.dumps({
+            "pid": 99999,
+            "start_time": 1000.0,
+            "kind": "hermes-gateway",
+            "gateway_status_schema_version": 2,
+            "gateway_state": "running",
+            "platforms": {},
+            "runtime_import_authority": {
+                "python_executable": "/home/jeremy/work/repos/hermes-agent-kanban-v2026.5.7/.venv/bin/python",
+                "cwd": "/home/jeremy/work/repos/hermes-agent-kanban-v2026.5.7",
+                "project_root": "/home/jeremy/work/repos/hermes-agent-kanban-v2026.5.7",
+            },
+            "process_heartbeat_at": "2025-01-01T00:00:00Z",
+            "process_heartbeat_mono": 1.0,
+            "updated_at": "2025-01-01T00:00:00Z",
+        }))
+        monkeypatch.setattr(status.sys, "executable", "/home/jeremy/work/repos/hermes-agent-rescue-runtime-20260523/.venv/bin/python")
+        monkeypatch.setattr(status.os, "getcwd", lambda: "/home/jeremy/work/repos/hermes-agent-rescue-runtime-20260523")
+        monkeypatch.setattr(status.time, "monotonic", lambda: 456.789)
+
+        status.write_runtime_status(gateway_state="running")
+
+        payload = status.read_runtime_status()
+        authority = payload["runtime_import_authority"]
+        assert authority["python_executable"] == "/home/jeremy/work/repos/hermes-agent-rescue-runtime-20260523/.venv/bin/python"
+        assert authority["cwd"] == "/home/jeremy/work/repos/hermes-agent-rescue-runtime-20260523"
+        assert Path(authority["project_root"]) == Path(status.__file__).resolve().parents[1]
+        assert "hermes-agent-kanban-v2026.5.7" not in json.dumps(authority)
+        assert payload["pid"] == os.getpid()
+        assert payload["gateway_status_schema_version"] == 2
+        assert payload["gateway_state"] == "running"
+        assert payload["process_heartbeat_mono"] == 456.789
+
     def test_write_runtime_status_refreshes_stale_v2_heartbeat(self, tmp_path, monkeypatch):
         monkeypatch.setenv("HERMES_HOME", str(tmp_path))
         state_path = tmp_path / "gateway_state.json"
