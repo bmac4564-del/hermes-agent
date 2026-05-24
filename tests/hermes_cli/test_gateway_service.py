@@ -234,6 +234,42 @@ class TestSystemdServiceRefresh:
         assert unit_path.read_text(encoding="utf-8") == "new unit\n"
         assert ["systemctl", "--user", "daemon-reload"] in calls
 
+    def test_refresh_rewrites_replace_unit_to_foreground_execstart(
+        self, tmp_path, monkeypatch
+    ):
+        """Refreshing an old systemd unit must remove manual --replace semantics."""
+        unit_path = tmp_path / "hermes-gateway.service"
+        unit_path.write_text(
+            "[Unit]\n"
+            "Description=Hermes Gateway\n"
+            "[Service]\n"
+            "ExecStart=/old/python -m hermes_cli.main gateway run --replace\n",
+            encoding="utf-8",
+        )
+        daemon_reload_calls = []
+
+        monkeypatch.setattr(
+            gateway_cli, "get_systemd_unit_path", lambda system=False: unit_path
+        )
+        monkeypatch.setattr(gateway_cli, "get_python_path", lambda: "/venv/bin/python")
+        monkeypatch.setattr(gateway_cli, "_detect_venv_dir", lambda: Path("/venv"))
+        monkeypatch.setattr(gateway_cli, "get_hermes_home", lambda: Path("/home/test/.hermes"))
+        monkeypatch.setattr(gateway_cli.shutil, "which", lambda cmd: None)
+        monkeypatch.setattr(gateway_cli, "is_wsl", lambda: False)
+        monkeypatch.setattr(
+            gateway_cli,
+            "_run_systemctl",
+            lambda args, **kwargs: daemon_reload_calls.append(args),
+        )
+
+        result = gateway_cli.refresh_systemd_unit_if_needed(system=False)
+
+        refreshed = unit_path.read_text(encoding="utf-8")
+        assert result is True
+        assert "gateway run" in refreshed
+        assert "--replace" not in refreshed
+        assert ["daemon-reload"] in daemon_reload_calls
+
     def test_refresh_refuses_to_bake_pytest_tmpdir_into_real_user_unit(
         self, tmp_path, monkeypatch
     ):
@@ -324,6 +360,8 @@ class TestGeneratedSystemdUnits:
         unit = gateway_cli.generate_systemd_unit(system=False)
 
         assert "ExecStart=" in unit
+        assert "gateway run" in unit
+        assert "--replace" not in unit
         assert "ExecStop=" not in unit
         assert "ExecReload=/bin/kill -USR1 $MAINPID" in unit
         assert f"RestartForceExitStatus={GATEWAY_SERVICE_RESTART_EXIT_CODE}" in unit
@@ -385,6 +423,8 @@ class TestGeneratedSystemdUnits:
         unit = gateway_cli.generate_systemd_unit(system=True)
 
         assert "ExecStart=" in unit
+        assert "gateway run" in unit
+        assert "--replace" not in unit
         assert "ExecStop=" not in unit
         assert "ExecReload=/bin/kill -USR1 $MAINPID" in unit
         assert f"RestartForceExitStatus={GATEWAY_SERVICE_RESTART_EXIT_CODE}" in unit
@@ -1618,7 +1658,8 @@ class TestProfileArg:
         monkeypatch.setattr(gateway_cli, "get_hermes_home", lambda: profile_dir)
         unit = gateway_cli.generate_systemd_unit(system=False)
         assert "--profile mybot" in unit
-        assert "gateway run --replace" in unit
+        assert "gateway run" in unit
+        assert "--replace" not in unit
 
     def test_launchd_plist_includes_profile(self, tmp_path, monkeypatch):
         """generate_launchd_plist should include --profile in ProgramArguments for named profiles."""
