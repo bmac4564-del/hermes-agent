@@ -386,6 +386,43 @@ def test_graphify_freshness_passes_when_graph_is_current(tmp_path):
     assert checks[0].status == "ok"
 
 
+def test_graphify_freshness_reports_source_stat_race(tmp_path, monkeypatch):
+    vault = tmp_path / "vault"
+    source = vault / "Graphify" / "graph-manifest.json"
+    source.parent.mkdir(parents=True)
+    source.write_text("{}", encoding="utf-8")
+    graph = tmp_path / "artifacts" / "graph.json"
+    graph.parent.mkdir(parents=True)
+    graph.write_text("{}", encoding="utf-8")
+    paths_env = pad.ParsedPathsEnv(
+        path=tmp_path / "paths.env",
+        exists=True,
+        values={
+            "OBSIDIAN_VAULT_PATH": str(vault),
+            "GRAPHIFY_GRAPH_JSON": str(graph),
+        },
+        redacted={},
+    )
+    original_stat = Path.stat
+    source_stat_calls = 0
+
+    def flaky_stat(self, *args, **kwargs):
+        nonlocal source_stat_calls
+        if self == source:
+            source_stat_calls += 1
+            if source_stat_calls > 1:
+                raise FileNotFoundError(str(self))
+        return original_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", flaky_stat)
+
+    checks = pad._check_graphify_freshness(paths_env)
+
+    assert checks[0].id == "graphify_freshness"
+    assert checks[0].status == "warn"
+    assert "stat" in checks[0].message.lower()
+
+
 def test_dirty_active_repo_classification():
     other = pad.classify_dirty_repo([" M docs/readme.md"])
     authority = pad.classify_dirty_repo([" M gateway/status.py"])

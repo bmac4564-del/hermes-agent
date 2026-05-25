@@ -1157,8 +1157,17 @@ def _ensure_pytest_kanban_path_isolated(db_path: Optional[Path]) -> None:
         return
     if os.environ.get("HERMES_KANBAN_HOME", "").strip():
         return
-    if os.environ.get("HERMES_KANBAN_DB", "").strip():
-        return
+    kanban_db = os.environ.get("HERMES_KANBAN_DB", "").strip()
+    if kanban_db:
+        if _path_is_under_system_temp(kanban_db):
+            return
+        raise RuntimeError(
+            "kanban DB opened from a pytest session with "
+            "HERMES_KANBAN_DB points outside the system temp directory. "
+            "This would write test data to a non-isolated SQLite DB. "
+            "Fix: set HERMES_KANBAN_DB to a temp path, set "
+            "HERMES_KANBAN_HOME, or pass db_path explicitly."
+        )
 
     hermes_home = os.environ.get("HERMES_HOME", "").strip()
     effective_root: str | Path = hermes_home if hermes_home else Path.home()

@@ -629,6 +629,13 @@ def _check_webui_graphify_authority(
     ]
 
 
+def _path_mtime(path: Path) -> float | None:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return None
+
+
 def _check_graphify_freshness(paths_env: ParsedPathsEnv) -> list[CheckResult]:
     vault = paths_env.values.get("OBSIDIAN_VAULT_PATH")
     graph = paths_env.values.get("GRAPHIFY_GRAPH_JSON")
@@ -664,9 +671,35 @@ def _check_graphify_freshness(paths_env: ParsedPathsEnv) -> list[CheckResult]:
             )
         ]
 
-    graph_mtime = graph_path.stat().st_mtime
-    latest = max(sources, key=lambda path: path.stat().st_mtime)
-    latest_mtime = latest.stat().st_mtime
+    graph_mtime = _path_mtime(graph_path)
+    if graph_mtime is None:
+        return [
+            CheckResult(
+                id="graphify_freshness",
+                severity="P1",
+                status="warn",
+                message="Could not stat Graphify sidecar graph",
+                detail=str(graph_path),
+            )
+        ]
+
+    source_mtimes = [
+        (source, mtime)
+        for source in sources
+        if (mtime := _path_mtime(source)) is not None
+    ]
+    if not source_mtimes:
+        return [
+            CheckResult(
+                id="graphify_freshness",
+                severity="P2",
+                status="warn",
+                message="Could not stat Graphify governance freshness source files",
+                detail=str(vault_path),
+            )
+        ]
+
+    latest, latest_mtime = max(source_mtimes, key=lambda item: item[1])
     detail = json.dumps(
         {
             "graph": str(graph_path),

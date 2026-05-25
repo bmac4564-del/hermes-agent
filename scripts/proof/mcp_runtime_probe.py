@@ -32,6 +32,17 @@ def _hard_timeout_exit() -> None:
     os._exit(124)
 
 
+def _invalid_timeout_report() -> dict[str, object]:
+    return {
+        "status": "error",
+        "status_counts": {"error": 1},
+        "check_status_counts": {"error": 1},
+        "servers": [],
+        "status_classes": ["error"],
+        "status_samples": {},
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runtime", choices=["codex", "claude", "hermes", "all"], default="all")
@@ -50,6 +61,9 @@ def main() -> int:
         help="Include Google Drive MCP entries that are only missing auth.",
     )
     args = parser.parse_args()
+    if args.timeout < 0:
+        print(json.dumps(_invalid_timeout_report(), indent=2, sort_keys=True))
+        return 2
 
     timer = None
     if args.timeout > 0:

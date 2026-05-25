@@ -96,6 +96,17 @@ def _command_summary(command: str | None, args: tuple[str, ...]) -> dict[str, An
     return {"basename": os.path.basename(command), "args_count": len(args)}
 
 
+def _normalize_args(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        arg = value.strip()
+        return (arg,) if arg else ()
+    if isinstance(value, (list, tuple)):
+        return tuple(str(arg) for arg in value)
+    return (str(value),)
+
+
 @dataclass(frozen=True)
 class NormalizedMCPServer:
     source: str
@@ -192,7 +203,7 @@ def normalize_mcp_servers(raw_configs: Mapping[str, Any]) -> list[NormalizedMCPS
         for name, cfg in servers.items():
             if not isinstance(cfg, Mapping):
                 continue
-            args = tuple(str(arg) for arg in (cfg.get("args") or []))
+            args = _normalize_args(cfg.get("args"))
             url = str(cfg.get("url") or "").strip() or None
             command = str(cfg.get("command") or "").strip() or None
             transport = str(cfg.get("transport") or "").strip().lower()
@@ -404,7 +415,10 @@ async def _probe_one(server: NormalizedMCPServer, connector: Connector) -> dict[
         return entry
     finally:
         if session is not None:
-            await _shutdown_session(session)
+            try:
+                await _shutdown_session(session)
+            except Exception as exc:
+                entry["checks"]["shutdown"] = _classify_exception(exc)
 
 
 def _add_status_samples(report: dict[str, Any]) -> None:
@@ -564,6 +578,17 @@ def main(argv: list[str] | None = None) -> int:
         help="include Google Drive MCP entries that are only missing auth",
     )
     args = parser.parse_args(argv)
+    if args.timeout < 0:
+        report = {
+            "status": "error",
+            "status_counts": {"error": 1},
+            "check_status_counts": {"error": 1},
+            "servers": [],
+            "status_classes": ["error"],
+            "status_samples": {},
+        }
+        print(json.dumps(report, indent=2, sort_keys=True))
+        return 2
 
     async def _run() -> dict[str, Any]:
         return await asyncio.wait_for(

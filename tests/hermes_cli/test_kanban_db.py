@@ -143,6 +143,24 @@ def test_connect_allows_kanban_db_env_under_pytest(tmp_path, monkeypatch):
     assert pinned_db.exists()
 
 
+def test_connect_rejects_kanban_db_env_outside_temp_under_pytest(monkeypatch):
+    pinned_db = Path("/home/test-user/.hermes/kanban/boards/live/kanban.db")
+    monkeypatch.delenv("HERMES_KANBAN_HOME", raising=False)
+    monkeypatch.setenv("HERMES_KANBAN_DB", str(pinned_db))
+    monkeypatch.delenv("HERMES_KANBAN_BOARD", raising=False)
+    realish_home = Path("/home/test-user")
+    monkeypatch.setattr(Path, "home", lambda: realish_home)
+    monkeypatch.setenv("HERMES_HOME", str(realish_home / ".hermes"))
+
+    def fail_if_connect_tries_to_create(_self, *args, **kwargs):
+        raise AssertionError("connect() should fail before creating directories")
+
+    monkeypatch.setattr(Path, "mkdir", fail_if_connect_tries_to_create)
+
+    with pytest.raises(RuntimeError, match="HERMES_KANBAN_DB points outside"):
+        kb.connect()
+
+
 def test_connect_rejects_kanban_board_env_as_pytest_isolation_override(monkeypatch):
     monkeypatch.delenv("HERMES_KANBAN_HOME", raising=False)
     monkeypatch.delenv("HERMES_KANBAN_DB", raising=False)
@@ -3643,4 +3661,3 @@ def test_maybe_emit_scratch_tip_skips_non_scratch_workspaces(kanban_home, caplog
                 "SELECT kind FROM task_events WHERE task_id = ?", (tid,),
             ).fetchall()
             assert "tip_scratch_workspace" not in [e["kind"] for e in events]
-

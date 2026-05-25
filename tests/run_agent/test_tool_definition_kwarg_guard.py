@@ -20,15 +20,26 @@ def _parse(path: Path) -> ast.AST:
     return ast.parse(path.read_text(encoding="utf-8"))
 
 
+def _walk_by_source_order(node: ast.AST) -> list[ast.AST]:
+    return sorted(
+        ast.walk(node),
+        key=lambda child: (
+            getattr(child, "lineno", 10**9),
+            getattr(child, "col_offset", 10**9),
+            child.__class__.__name__,
+        ),
+    )
+
+
 def _find_function(tree: ast.AST, name: str) -> ast.FunctionDef:
-    for node in ast.walk(tree):
+    for node in _walk_by_source_order(tree):
         if isinstance(node, ast.FunctionDef) and node.name == name:
             return node
     raise AssertionError(f"{name}() not found")
 
 
 def _agent_attr_assign_line(func: ast.FunctionDef, attr_name: str) -> int | None:
-    for node in ast.walk(func):
+    for node in _walk_by_source_order(func):
         targets = []
         if isinstance(node, ast.Assign):
             targets = list(node.targets)
@@ -46,7 +57,7 @@ def _agent_attr_assign_line(func: ast.FunctionDef, attr_name: str) -> int | None
 
 
 def _get_tool_definitions_line(func: ast.FunctionDef) -> int:
-    for node in ast.walk(func):
+    for node in _walk_by_source_order(func):
         if not isinstance(node, ast.Call):
             continue
         func_node = node.func
@@ -76,13 +87,13 @@ def _assert_attr_in_init_agent(attr_name: str) -> None:
 
 def _attr_used_by_aiagent_outside_init(attr_name: str) -> bool:
     tree = _parse(RUN_AGENT)
-    for node in ast.walk(tree):
+    for node in _walk_by_source_order(tree):
         if not isinstance(node, ast.ClassDef) or node.name != "AIAgent":
             continue
         for item in node.body:
             if isinstance(item, ast.FunctionDef) and item.name == "__init__":
                 continue
-            for child in ast.walk(item):
+            for child in _walk_by_source_order(item):
                 if (
                     isinstance(child, ast.Attribute)
                     and isinstance(child.value, ast.Name)
@@ -96,7 +107,7 @@ def _attr_used_by_aiagent_outside_init(attr_name: str) -> bool:
 
 def test_get_tool_definitions_call_uses_only_supported_kwargs():
     init_agent = _find_function(_parse(AGENT_INIT), "init_agent")
-    for node in ast.walk(init_agent):
+    for node in _walk_by_source_order(init_agent):
         if not isinstance(node, ast.Call):
             continue
         func_node = node.func
@@ -141,3 +152,21 @@ def test_conditionally_used_runtime_attrs_are_initialized_by_constructor_authori
     for attr in ("_session_init_model_config", "_last_flushed_db_idx"):
         if _attr_used_by_aiagent_outside_init(attr):
             _assert_attr_in_init_agent(attr)
+
+
+def test_static_ast_helpers_walk_nodes_in_source_order():
+    tree = ast.parse(
+        """
+def sample():
+    second()
+    first()
+"""
+    )
+
+    call_names = [
+        node.func.id
+        for node in _walk_by_source_order(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    ]
+
+    assert call_names == ["second", "first"]

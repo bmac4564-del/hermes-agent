@@ -1,6 +1,12 @@
 import asyncio
+import importlib.util
 import json
+import sys
+from pathlib import Path
 from types import SimpleNamespace
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 class FakeSession:
@@ -13,6 +19,7 @@ class FakeSession:
         resource_error=None,
         tool_error=None,
         prompt_error=None,
+        shutdown_error=None,
         capabilities=None,
     ):
         self._tools = tools or []
@@ -21,6 +28,7 @@ class FakeSession:
         self._resource_error = resource_error
         self._tool_error = tool_error
         self._prompt_error = prompt_error
+        self._shutdown_error = shutdown_error
         self._capabilities = capabilities
 
     async def initialize(self):
@@ -41,9 +49,22 @@ class FakeSession:
             raise self._prompt_error
         return SimpleNamespace(prompts=self._prompts)
 
+    async def shutdown(self):
+        if self._shutdown_error is not None:
+            raise self._shutdown_error
+
 
 def _run(coro):
     return asyncio.run(coro)
+
+
+def _load_proof_probe_module():
+    module_path = REPO_ROOT / "scripts" / "proof" / "mcp_runtime_probe.py"
+    spec = importlib.util.spec_from_file_location("_hermes_proof_mcp_runtime_probe", module_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_status_classes_do_not_advertise_unemitted_config_missing():
@@ -105,6 +126,26 @@ def test_normalizes_hermes_codex_and_claude_configs_without_secret_values():
     assert "secret" not in encoded
     assert "Bearer" not in encoded
     assert "/usr/local/bin/npx" not in encoded
+
+
+def test_normalizes_string_args_as_one_arg_not_characters():
+    from tools.mcp_runtime_probe import normalize_mcp_servers
+
+    servers = normalize_mcp_servers(
+        {
+            "codex": {
+                "mcp_servers": {
+                    "string-args": {
+                        "command": "python",
+                        "args": "-m demo_server",
+                    }
+                }
+            }
+        }
+    )
+
+    assert servers[0].args == ("-m demo_server",)
+    assert servers[0].redacted_summary()["command"]["args_count"] == 1
 
 
 def test_missing_stdio_executable_reports_offline_and_does_not_connect(monkeypatch):
@@ -255,6 +296,31 @@ def test_prompts_are_probed_and_counted_when_advertised():
     assert entry["prompts_count"] == 1
 
 
+def test_shutdown_error_is_reported_without_overriding_probe_result():
+    from tools.mcp_runtime_probe import NormalizedMCPServer, probe_servers
+
+    async def connector(server):
+        return FakeSession(
+            tools=[SimpleNamespace(name="search")],
+            shutdown_error=RuntimeError("cleanup failed"),
+        )
+
+    server = NormalizedMCPServer(
+        source="hermes",
+        name="cleanup-fails",
+        config={},
+        transport="http",
+        url="https://example.test/mcp",
+    )
+
+    report = _run(probe_servers([server], connector=connector))
+
+    entry = report["servers"][0]
+    assert entry["status"] == "ok"
+    assert entry["checks"]["tools"] == "ok"
+    assert entry["checks"]["shutdown"] == "error"
+
+
 def test_advertised_prompts_failure_degrades_status():
     from tools.mcp_runtime_probe import NormalizedMCPServer, probe_servers
 
@@ -398,3 +464,21 @@ def test_probe_default_sources_filters_server(monkeypatch, tmp_path):
     report = _run(mcp_runtime_probe.probe_default_sources(runtime="codex", server_name="context7"))
 
     assert report["servers"] == ["codex:context7"]
+
+
+def test_proof_probe_rejects_negative_timeout(monkeypatch, capsys):
+    proof_probe = _load_proof_probe_module()
+
+    async def fail_if_called(**_kwargs):
+        raise AssertionError("negative timeout should be rejected before probing")
+
+    monkeypatch.setattr(proof_probe, "probe_default_sources", fail_if_called)
+    monkeypatch.setattr(sys, "argv", ["mcp_runtime_probe.py", "--timeout", "-1"])
+
+    rc = proof_probe.main()
+    stdout = capsys.readouterr().out
+
+    report = json.loads(stdout)
+    assert rc == 2
+    assert report["status"] == "error"
+    assert report["check_status_counts"] == {"error": 1}
