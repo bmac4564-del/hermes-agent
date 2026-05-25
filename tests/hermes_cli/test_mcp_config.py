@@ -60,7 +60,7 @@ def _seed_config(tmp_path: Path, mcp_servers: dict):
 
     config = {"mcp_servers": mcp_servers, "_config_version": 9}
     config_path = tmp_path / "config.yaml"
-    with open(config_path, "w") as f:
+    with open(config_path, "w", encoding="utf-8") as f:
         yaml.safe_dump(config, f)
 
 
@@ -215,6 +215,40 @@ class TestMcpAdd:
         config = load_config()
         assert "ink" in config.get("mcp_servers", {})
         assert config["mcp_servers"]["ink"]["url"] == "https://mcp.ml.ink/mcp"
+
+    def test_add_http_oauth_passes_redirect_config_to_provider(self, capsys, monkeypatch):
+        """OAuth provider construction receives explicit redirect config."""
+        seen = []
+
+        class FakeManager:
+            def get_or_build_provider(self, name, url, oauth_config):
+                seen.append((name, url, oauth_config))
+                return object()
+
+        monkeypatch.setattr(
+            "tools.mcp_oauth_manager.get_manager", lambda: FakeManager()
+        )
+        monkeypatch.setattr(
+            "hermes_cli.mcp_config._probe_single_server",
+            lambda name, config, **kw: [("search", "Search")],
+        )
+        monkeypatch.setattr("builtins.input", lambda _: "")
+
+        from hermes_cli.mcp_config import cmd_mcp_add
+
+        cmd_mcp_add(_make_args(
+            name="oauth-srv",
+            url="https://example.com/mcp",
+            auth="oauth",
+        ))
+
+        out = capsys.readouterr().out
+        assert "OAuth configured" in out
+        assert seen == [(
+            "oauth-srv",
+            "https://example.com/mcp",
+            {"redirect_port": 0},
+        )]
 
     def test_add_stdio_server(self, tmp_path, capsys, monkeypatch):
         """Add a stdio server."""
@@ -540,6 +574,65 @@ class TestDispatcher:
         out = capsys.readouterr().out
         assert "Commands:" in out or "No MCP servers" in out
 
+    def test_runtime_probe_dispatches_redacted_json(self, monkeypatch, capsys):
+        from hermes_cli.mcp_config import mcp_command
+
+        async def fake_probe_default_sources(**kwargs):
+            return {"servers": ["codex:context7"], "kwargs": kwargs}
+
+        monkeypatch.setattr(
+            "tools.mcp_runtime_probe.probe_default_sources",
+            fake_probe_default_sources,
+        )
+
+        mcp_command(
+            _make_args(
+                mcp_action="runtime-probe",
+                runtime="codex",
+                server="context7",
+                timeout=1,
+                skip_auth_needed=True,
+                include_google_drive_auth_needed=False,
+            )
+        )
+
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["servers"] == ["codex:context7"]
+        assert payload["kwargs"]["runtime"] == "codex"
+        assert payload["kwargs"]["server_name"] == "context7"
+
+    def test_runtime_probe_generic_exception_emits_structured_json(
+        self, monkeypatch, capsys,
+    ):
+        from hermes_cli.mcp_config import mcp_command
+
+        async def fake_probe_default_sources(**_kwargs):
+            raise RuntimeError("boom SECRET_VALUE_DO_NOT_PRINT")
+
+        monkeypatch.setattr(
+            "tools.mcp_runtime_probe.probe_default_sources",
+            fake_probe_default_sources,
+        )
+
+        mcp_command(
+            _make_args(
+                mcp_action="runtime-probe",
+                runtime="codex",
+                server="context7",
+                timeout=1,
+                skip_auth_needed=True,
+                include_google_drive_auth_needed=False,
+            )
+        )
+
+        out = capsys.readouterr().out
+        payload = json.loads(out)
+        assert payload["status"] == "error"
+        assert payload["status_counts"] == {"error": 1}
+        assert payload["check_status_counts"] == {"error": 1}
+        assert "Traceback" not in out
+        assert "SECRET_VALUE_DO_NOT_PRINT" not in out
+
 
 # ---------------------------------------------------------------------------
 # Tests: Task 7 consolidation — cmd_mcp_remove evicts manager cache,
@@ -564,7 +657,7 @@ class TestMcpRemoveEvictsManager:
 
         mgr = get_manager()
         mgr.get_or_build_provider(
-            "oauth-srv", "https://example.com/mcp", None,
+            "oauth-srv", "https://example.com/mcp", {"redirect_port": 8765},
         )
         assert "oauth-srv" in mgr._entries
 
@@ -599,4 +692,3 @@ class TestMcpLogin:
         cmd_mcp_login(_make_args(name="srv"))
         out = capsys.readouterr().out
         assert "no URL" in out or "not an OAuth" in out
-

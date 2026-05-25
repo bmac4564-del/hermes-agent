@@ -20,11 +20,13 @@ OpenRouter variant suffixes (``:free``, ``:extended``, ``:fast``).
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import re
 from dataclasses import dataclass
 from typing import List, NamedTuple, Optional
 
+from utils import base_url_hostname
 from hermes_cli.providers import (
     custom_provider_slug,
     determine_api_mode,
@@ -44,6 +46,23 @@ from agent.models_dev import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _base_url_is_loopback(base_url: str) -> bool:
+    """Return True for localhost / loopback model endpoints.
+
+    Local OpenAI-compatible servers are often running while tests execute; if a
+    custom provider also declares an explicit model list, the picker must not
+    replace that curated list with whatever happens to be live on the developer
+    machine.
+    """
+    host = base_url_hostname(base_url)
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -1649,6 +1668,11 @@ def list_authenticated_providers(
         _section4_emitted_slugs: set = set()
         for grp_key, grp in groups.items():
             api_url, api_key = grp_key
+            api_key_is_placeholder = str(api_key).strip().lower() in {
+                "***",
+                "[redacted]",
+                "redacted",
+            }
             slug = grp["slug"]
             # If the slug is already claimed by a built-in / overlay /
             # user-provider row (sections 1-3), skip this custom group
@@ -1694,10 +1718,13 @@ def list_authenticated_providers(
             # the Telegram/Discord picker should do the same for parity.
             # Live-discovery policy:
             # - With an api_key, the user has explicitly opted into the
-            #   endpoint and live /models is the source of truth — replace
-            #   the (possibly partial) ``models:`` subset configured for
-            #   context-length overrides with the full live catalog.
-            #   This is the Bifrost / aggregator-gateway case.
+            #   endpoint and live /models is normally the source of truth —
+            #   replace the (possibly partial) ``models:`` subset configured
+            #   for context-length overrides with the full live catalog. This
+            #   is the Bifrost / aggregator-gateway case. Loopback endpoints
+            #   are the exception when they already declare explicit models:
+            #   never let whatever happens to be running on localhost replace
+            #   the curated config list.
             # - Without an api_key but with an explicit ``models:`` list
             #   (or top-level ``model:``), the user is narrowing a public
             #   endpoint to a specific subset (e.g. ollama.com /v1/models
@@ -1706,7 +1733,18 @@ def list_authenticated_providers(
             # - Without an api_key AND no explicit models, fall through to
             #   live discovery so bare-endpoint custom providers (local
             #   llama.cpp / Ollama servers) still appear populated.
-            should_probe = bool(api_url) and (bool(api_key) or not grp["models"])
+            has_explicit_models = bool(grp["models"])
+            local_endpoint_with_explicit_models = (
+                has_explicit_models and _base_url_is_loopback(api_url)
+            )
+            should_probe = bool(api_url) and not local_endpoint_with_explicit_models and not (
+                bool(current_base_url)
+                and _grp_url_norm == current_base_url.strip().rstrip("/").lower()
+                and has_explicit_models
+            ) and (
+                (bool(api_key) and not api_key_is_placeholder)
+                or not has_explicit_models
+            )
             if should_probe:
                 try:
                     from hermes_cli.models import fetch_api_models

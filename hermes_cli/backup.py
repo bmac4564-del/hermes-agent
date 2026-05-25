@@ -849,7 +849,9 @@ def create_pre_update_backup(
         logger.warning("Could not create pre-update backup dir %s: %s", backup_dir, exc)
         return None
 
-    stamp = datetime.now().strftime("%Y-%m-%d-%H%M%S")
+    # Include microseconds so repeated backups in the same second create
+    # distinct recovery points instead of overwriting the previous archive.
+    stamp = datetime.now().strftime("%Y-%m-%d-%H%M%S-%f")
     out_path = backup_dir / f"{_PRE_UPDATE_PREFIX}{stamp}.zip"
 
     result = _write_full_zip_backup(out_path, hermes_root)

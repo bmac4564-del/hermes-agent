@@ -12047,6 +12047,24 @@ def main():
             "doctor` first to see active advisories and their IDs."
         ),
     )
+    doctor_parser.add_argument(
+        "--path-authority",
+        action="store_true",
+        help="Run read-only Kanban path-authority diagnostics",
+    )
+    doctor_parser.add_argument(
+        "--json", action="store_true", help="Emit machine-readable JSON output"
+    )
+    doctor_parser.add_argument(
+        "--no-live",
+        action="store_true",
+        help="Skip live runtime-status checks for path-authority diagnostics",
+    )
+    doctor_parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Exit non-zero on any path-authority finding",
+    )
     doctor_parser.set_defaults(func=cmd_doctor)
 
     # =========================================================================
@@ -12983,6 +13001,47 @@ Examples:
     )
     mcp_login_p.add_argument("name", help="Server name to re-authenticate")
 
+    mcp_runtime_probe_p = mcp_sub.add_parser(
+        "runtime-probe",
+        help="Run a redacted initialize/list runtime-depth probe",
+    )
+    mcp_runtime_probe_p.add_argument(
+        "--runtime",
+        choices=["codex", "claude", "hermes", "all"],
+        default="all",
+        help="Config runtime to probe (default: all)",
+    )
+    mcp_runtime_probe_p.add_argument(
+        "--server",
+        help="Probe only one server name or source:name id",
+    )
+    mcp_runtime_probe_p.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit JSON; retained for proof command symmetry",
+    )
+    mcp_runtime_probe_p.add_argument(
+        "--redact",
+        action="store_true",
+        help="Force redacted output; all output is always redacted",
+    )
+    mcp_runtime_probe_p.add_argument(
+        "--timeout",
+        type=int,
+        default=120,
+        help="Overall probe timeout in seconds",
+    )
+    mcp_runtime_probe_p.add_argument(
+        "--skip-auth-needed",
+        action="store_true",
+        help="Skip entries known to need interactive auth, including Google Drive",
+    )
+    mcp_runtime_probe_p.add_argument(
+        "--include-google-drive-auth-needed",
+        action="store_true",
+        help="Include Google Drive MCP entries that are only missing auth",
+    )
+
     _add_accept_hooks_flag(mcp_parser)
 
     def cmd_mcp(args):
@@ -13875,6 +13934,26 @@ Examples:
     else:
         subparsers.required = False
         args = parser.parse_args(_processed_argv)
+
+    # Path-authority flags are scoped to `hermes doctor --path-authority`.
+    # Rejecting them before cmd_doctor avoids silently running the broad doctor
+    # while the caller expected machine-readable/path-authority semantics.
+    if getattr(args, "command", None) == "doctor" and not getattr(args, "path_authority", False):
+        scoped_doctor_flags = [
+            flag
+            for attr, flag in (
+                ("json", "--json"),
+                ("no_live", "--no-live"),
+                ("strict", "--strict"),
+            )
+            if getattr(args, attr, False)
+        ]
+        if scoped_doctor_flags:
+            parser.error(
+                "doctor flag(s) "
+                + ", ".join(scoped_doctor_flags)
+                + " require --path-authority"
+            )
 
     # Handle --version flag
     if args.version:

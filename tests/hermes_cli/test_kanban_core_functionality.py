@@ -35,6 +35,13 @@ def kanban_home(tmp_path, monkeypatch):
     home = tmp_path / ".hermes"
     home.mkdir()
     monkeypatch.setenv("HERMES_HOME", str(home))
+    for var in (
+        "HERMES_KANBAN_DB",
+        "HERMES_KANBAN_WORKSPACES_ROOT",
+        "HERMES_KANBAN_HOME",
+        "HERMES_KANBAN_BOARD",
+    ):
+        monkeypatch.delenv(var, raising=False)
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     kb.init_db()
     return home
@@ -2194,6 +2201,13 @@ def test_cli_create_on_fresh_home_auto_inits(tmp_path, monkeypatch):
     worktree_root = Path(__file__).resolve().parents[2]
     env = {**os.environ, "HERMES_HOME": str(home),
            "PYTHONPATH": str(worktree_root)}
+    for var in (
+        "HERMES_KANBAN_DB",
+        "HERMES_KANBAN_WORKSPACES_ROOT",
+        "HERMES_KANBAN_HOME",
+        "HERMES_KANBAN_BOARD",
+    ):
+        env.pop(var, None)
     r = _sp.run(
         [_sys.executable, "-m", "hermes_cli.main", "kanban",
          "create", "smoke", "--assignee", "worker", "--json"],
@@ -2444,7 +2458,7 @@ def test_pid_alive_detects_zombie(kanban_home):
         time.sleep(0.3)
         # Verify /proc reports zombie state so the test is actually
         # exercising the zombie path and not some other liveness failure
-        with open(f"/proc/{pid}/status") as f:
+        with open(f"/proc/{pid}/status", encoding="utf-8") as f:
             state_line = next(
                 (l for l in f if l.startswith("State:")), ""
             )
