@@ -216,6 +216,40 @@ class TestMcpAdd:
         assert "ink" in config.get("mcp_servers", {})
         assert config["mcp_servers"]["ink"]["url"] == "https://mcp.ml.ink/mcp"
 
+    def test_add_http_oauth_passes_redirect_config_to_provider(self, capsys, monkeypatch):
+        """OAuth provider construction receives explicit redirect config."""
+        seen = []
+
+        class FakeManager:
+            def get_or_build_provider(self, name, url, oauth_config):
+                seen.append((name, url, oauth_config))
+                return object()
+
+        monkeypatch.setattr(
+            "tools.mcp_oauth_manager.get_manager", lambda: FakeManager()
+        )
+        monkeypatch.setattr(
+            "hermes_cli.mcp_config._probe_single_server",
+            lambda name, config, **kw: [("search", "Search")],
+        )
+        monkeypatch.setattr("builtins.input", lambda _: "")
+
+        from hermes_cli.mcp_config import cmd_mcp_add
+
+        cmd_mcp_add(_make_args(
+            name="oauth-srv",
+            url="https://example.com/mcp",
+            auth="oauth",
+        ))
+
+        out = capsys.readouterr().out
+        assert "OAuth configured" in out
+        assert seen == [(
+            "oauth-srv",
+            "https://example.com/mcp",
+            {"redirect_port": 0},
+        )]
+
     def test_add_stdio_server(self, tmp_path, capsys, monkeypatch):
         """Add a stdio server."""
         fake_tools = [FakeTool("search", "Search repos")]
