@@ -267,12 +267,11 @@ def set_current_board(slug: str) -> Path:
     so that ``hermes kanban boards switch <typo>`` returns an error
     instead of silently pointing at nothing.
     """
-    _ensure_pytest_kanban_path_isolated(None)
-
     normed = _normalize_board_slug(slug)
     if not normed:
         raise ValueError("board slug is required")
     path = current_board_path()
+    _ensure_pytest_kanban_filesystem_path_isolated(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(normed + "\n", encoding="utf-8")
     return path
@@ -280,10 +279,10 @@ def set_current_board(slug: str) -> Path:
 
 def clear_current_board() -> None:
     """Remove ``<root>/kanban/current`` so the active board reverts to ``default``."""
-    _ensure_pytest_kanban_path_isolated(None)
-
+    path = current_board_path()
+    _ensure_pytest_kanban_filesystem_path_isolated(path)
     try:
-        current_board_path().unlink()
+        path.unlink()
     except FileNotFoundError:
         pass
 
@@ -449,9 +448,9 @@ def write_board_metadata(
     Preserves any existing fields not mentioned in the call. Sets
     ``created_at`` on first write. Returns the resulting metadata dict.
     """
-    _ensure_pytest_kanban_path_isolated(None)
-
     slug = _normalize_board_slug(board) or DEFAULT_BOARD
+    path = board_metadata_path(slug)
+    _ensure_pytest_kanban_filesystem_path_isolated(path)
     meta = read_board_metadata(slug)
     # Preserve existing DB-derived fields — they get re-computed each
     # read but shouldn't be written into board.json.
@@ -566,14 +565,13 @@ def remove_board(slug: str, *, archive: bool = True) -> dict:
     Returns a summary dict describing what happened (``{"slug", "action",
     "new_path"}``).
     """
-    _ensure_pytest_kanban_path_isolated(None)
-
     normed = _normalize_board_slug(slug)
     if not normed:
         raise ValueError("board slug is required")
     if normed == DEFAULT_BOARD:
         raise ValueError("the 'default' board cannot be removed")
     d = board_dir(normed)
+    _ensure_pytest_kanban_filesystem_path_isolated(d)
     if not d.exists():
         raise ValueError(f"board {normed!r} does not exist")
 
@@ -1152,7 +1150,7 @@ def _path_is_under_system_temp(path_value: str | Path) -> bool:
 
 
 def _ensure_pytest_kanban_path_isolated(db_path: Optional[Path]) -> None:
-    """Fail closed before pytest can resolve default Kanban paths to live state."""
+    """Fail closed before pytest can resolve default Kanban DB paths to live state."""
     if db_path is not None:
         return
     if not os.environ.get("PYTEST_CURRENT_TEST"):
@@ -1176,6 +1174,42 @@ def _ensure_pytest_kanban_path_isolated(db_path: Optional[Path]) -> None:
         "Fix: ensure _hermetic_environment conftest fixture is active, "
         "set HERMES_KANBAN_HOME/HERMES_KANBAN_DB, or pass db_path "
         "explicitly to this call."
+    )
+
+
+def _path_is_under(root: str | Path, path_value: str | Path) -> bool:
+    try:
+        root_path = Path(root).expanduser().resolve(strict=False)
+        path = Path(path_value).expanduser().resolve(strict=False)
+        return os.path.commonpath([str(root_path), str(path)]) == str(root_path)
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
+def _ensure_pytest_kanban_filesystem_path_isolated(path: Path) -> None:
+    """Fail closed before pytest mutates board filesystem paths in live state.
+
+    ``HERMES_KANBAN_DB`` isolates SQLite writes only. Board metadata,
+    current-board pointers, and worker logs resolve through ``kanban_home()``,
+    so filesystem mutators must require either an explicit Kanban home or a
+    target path under the system temp tree.
+    """
+    if not os.environ.get("PYTEST_CURRENT_TEST"):
+        return
+
+    override = os.environ.get("HERMES_KANBAN_HOME", "").strip()
+    if override and _path_is_under(override, path):
+        return
+    if _path_is_under_system_temp(path):
+        return
+
+    raise RuntimeError(
+        "kanban filesystem mutation from a pytest session without an "
+        "isolated HERMES_KANBAN_HOME or temporary Hermes root. "
+        "HERMES_KANBAN_DB only isolates sqlite DB writes; it does not "
+        "isolate board metadata, current-board, or worker-log filesystem "
+        "paths. Fix: set HERMES_KANBAN_HOME for filesystem-mutating tests "
+        "or run them under a temporary HERMES_HOME."
     )
 
 
@@ -6466,9 +6500,8 @@ def gc_worker_logs(
     log files live on disk, not in SQLite. Scoped to ``board`` (defaults
     to the active board) — per-board isolation means deleting logs from
     board A cannot touch board B's logs."""
-    _ensure_pytest_kanban_path_isolated(None)
-
     log_dir = worker_logs_dir(board=board)
+    _ensure_pytest_kanban_filesystem_path_isolated(log_dir)
     if not log_dir.exists():
         return 0
     cutoff = time.time() - older_than_seconds

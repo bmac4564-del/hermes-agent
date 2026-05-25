@@ -231,7 +231,34 @@ def test_kanban_path_mutators_reject_unisolated_pytest_root_before_writes(
 
     monkeypatch.setattr(Path, "mkdir", fail_if_mutator_tries_to_create)
 
-    with pytest.raises(RuntimeError, match="without HERMES_KANBAN_HOME or HERMES_KANBAN_DB"):
+    with pytest.raises(RuntimeError, match="without an isolated HERMES_KANBAN_HOME"):
+        mutator(*args)
+
+
+@pytest.mark.parametrize(
+    ("mutator", "args"),
+    [
+        (kb.set_current_board, ("test-board",)),
+        (kb.write_board_metadata, ("test-board",)),
+        (kb.create_board, ("test-board",)),
+        (kb.remove_board, ("test-board",)),
+        (kb.gc_worker_logs, ()),
+    ],
+)
+def test_kanban_filesystem_mutators_reject_kanban_db_as_only_pytest_isolation(
+    tmp_path,
+    monkeypatch,
+    mutator,
+    args,
+):
+    monkeypatch.delenv("HERMES_KANBAN_HOME", raising=False)
+    monkeypatch.setenv("HERMES_KANBAN_DB", str(tmp_path / "isolated-kanban.db"))
+    monkeypatch.delenv("HERMES_KANBAN_BOARD", raising=False)
+    realish_home = Path("/home/test-user")
+    monkeypatch.setattr(Path, "home", lambda: realish_home)
+    monkeypatch.setenv("HERMES_HOME", str(realish_home / ".hermes"))
+
+    with pytest.raises(RuntimeError, match="HERMES_KANBAN_DB only isolates sqlite DB writes"):
         mutator(*args)
 
 
@@ -243,7 +270,7 @@ def test_remove_board_rejects_unisolated_pytest_root_before_path_access(monkeypa
     monkeypatch.setattr(Path, "home", lambda: realish_home)
     monkeypatch.setenv("HERMES_HOME", str(realish_home / ".hermes"))
 
-    with pytest.raises(RuntimeError, match="without HERMES_KANBAN_HOME or HERMES_KANBAN_DB"):
+    with pytest.raises(RuntimeError, match="without an isolated HERMES_KANBAN_HOME"):
         kb.remove_board("test-board")
 
 
@@ -255,7 +282,7 @@ def test_gc_worker_logs_rejects_unisolated_pytest_root_before_path_access(monkey
     monkeypatch.setattr(Path, "home", lambda: realish_home)
     monkeypatch.setenv("HERMES_HOME", str(realish_home / ".hermes"))
 
-    with pytest.raises(RuntimeError, match="without HERMES_KANBAN_HOME or HERMES_KANBAN_DB"):
+    with pytest.raises(RuntimeError, match="without an isolated HERMES_KANBAN_HOME"):
         kb.gc_worker_logs(board="test-board")
 
 
