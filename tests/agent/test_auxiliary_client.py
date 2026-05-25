@@ -430,6 +430,89 @@ class TestBuildCodexClient:
         assert mock_openai.call_count == 2
 
 
+class TestResolveProviderClientEmptyModelFallback:
+    """resolve_provider_client(xai-oauth, "") and (openai-codex, "") must
+    fall back to the user's main model (#31845).
+
+    Title generation and a few other auxiliary tasks can reach
+    resolve_provider_client without an explicit model.  Before the fix,
+    both OAuth providers' inner builders returned (None, None) on empty
+    model, the resolver bubbled the None up, and _resolve_auto silently
+    dropped to its Step-2 fallback chain (OpenRouter / Nous / etc.).
+    Users on xai-oauth or openai-codex with a refresh token sitting
+    right there got surprise bills on their fallback provider for side
+    tasks they assumed were running on their main subscription.
+    """
+
+    def test_xai_oauth_empty_model_falls_back_to_main_model(self):
+        from agent.auxiliary_client import resolve_provider_client
+
+        with (
+            patch(
+                "agent.auxiliary_client._read_main_model",
+                return_value="grok-4.3",
+            ) as mock_read,
+            patch(
+                "agent.auxiliary_client._build_xai_oauth_aux_client",
+                return_value=(MagicMock(), "grok-4.3"),
+            ) as mock_build,
+        ):
+            client, model = resolve_provider_client("xai-oauth", "")
+
+        assert client is not None, "should not fall through when main model is set"
+        assert model == "grok-4.3"
+        mock_read.assert_called_once()
+        # The builder must be called with the main-model fallback, not the
+        # empty string the caller passed.
+        assert mock_build.call_args.args[0] == "grok-4.3"
+
+    def test_openai_codex_empty_model_falls_back_to_main_model(self):
+        """Symmetric with the xai-oauth case — same shape, same fix."""
+        from agent.auxiliary_client import resolve_provider_client
+
+        with (
+            patch(
+                "agent.auxiliary_client._read_main_model",
+                return_value="gpt-5.4",
+            ) as mock_read,
+            patch(
+                "agent.auxiliary_client._build_codex_client",
+                return_value=(MagicMock(), "gpt-5.4"),
+            ) as mock_build,
+            patch(
+                "agent.auxiliary_client._select_pool_entry",
+                return_value=(True, None),
+            ),
+        ):
+            client, model = resolve_provider_client("openai-codex", "")
+
+        assert client is not None
+        assert model == "gpt-5.4"
+        mock_read.assert_called_once()
+        assert mock_build.call_args.args[0] == "gpt-5.4"
+
+    def test_xai_oauth_explicit_model_does_not_consult_main_model(self):
+        """When caller passes a model, we use it as-is — no main-model
+        lookup, no surprise switching."""
+        from agent.auxiliary_client import resolve_provider_client
+
+        with (
+            patch("agent.auxiliary_client._read_main_model") as mock_read,
+            patch(
+                "agent.auxiliary_client._build_xai_oauth_aux_client",
+                return_value=(MagicMock(), "grok-4.20-multi-agent"),
+            ) as mock_build,
+        ):
+            client, model = resolve_provider_client(
+                "xai-oauth", "grok-4.20-multi-agent",
+            )
+
+        assert client is not None
+        assert model == "grok-4.20-multi-agent"
+        mock_read.assert_not_called()
+        assert mock_build.call_args.args[0] == "grok-4.20-multi-agent"
+
+
 class TestExpiredCodexFallback:
     """Test that expired Codex tokens don't block the auto chain."""
 

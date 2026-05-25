@@ -3215,14 +3215,16 @@ def resolve_provider_client(
 
     # ── OpenAI Codex (OAuth → Responses API) ─────────────────────────
     if provider == "openai-codex":
-        if not model:
-            logger.warning(
-                "resolve_provider_client: openai-codex requested without a "
-                "model; pass model explicitly (e.g. model.model in config.yaml "
-                "or auxiliary.<task>.model for per-task aux routing)."
-            )
-            return None, None
         if raw_codex:
+            # raw_codex is used by the main agent loop, which always knows
+            # its model.  Empty model in this path indicates a programming
+            # error rather than a stray aux call — keep the original guard.
+            if not model:
+                logger.warning(
+                    "resolve_provider_client: openai-codex (raw_codex) "
+                    "requested without a model; pass model explicitly."
+                )
+                return None, None
             # Return the raw OpenAI client for callers that need direct
             # access to responses.stream() (e.g., the main agent loop).
             codex_token = _read_codex_access_token()
@@ -3238,12 +3240,19 @@ def resolve_provider_client(
             )
             return (raw_client, final_model)
         # Standard path: wrap in CodexAuxiliaryClient adapter
-        client, default = _build_codex_client(model)
+        # Title generation and some other auxiliary tasks may not pass an
+        # explicit model — fall back to the user's main model so we stay
+        # on the configured Codex backend instead of silently dropping to
+        # Step-2 fallbacks (OpenRouter / Nous / etc.).  Symmetric with the
+        # xai-oauth branch below; both providers are OAuth-gated and have
+        # no safe hardcoded default model.
+        effective_model = model or _read_main_model()
+        client, default = _build_codex_client(effective_model)
         if client is None:
             logger.warning("resolve_provider_client: openai-codex requested "
                            "but no Codex OAuth token found (run: hermes model)")
             return None, None
-        final_model = _normalize_resolved_model(model or default, provider)
+        final_model = _normalize_resolved_model(effective_model or default, provider)
         return (_to_async_client(client, final_model, is_vision=is_vision) if async_mode
                 else (client, final_model))
 
