@@ -311,6 +311,23 @@ def test_default_spawn_rejects_kanban_db_as_only_pytest_isolation(tmp_path, monk
         kb._default_spawn(task, str(tmp_path), board="test-board")
 
 
+def test_scratch_tip_sentinel_rejects_kanban_db_as_only_pytest_isolation(tmp_path, monkeypatch):
+    monkeypatch.delenv("HERMES_KANBAN_HOME", raising=False)
+    monkeypatch.setenv("HERMES_KANBAN_DB", str(tmp_path / "isolated-kanban.db"))
+    monkeypatch.delenv("HERMES_KANBAN_BOARD", raising=False)
+    realish_home = Path("/home/test-user")
+    monkeypatch.setattr(Path, "home", lambda: realish_home)
+    monkeypatch.setenv("HERMES_HOME", str(realish_home / ".hermes"))
+
+    def fail_if_sentinel_mutator_reaches_mkdir(_self, *args, **kwargs):
+        raise AssertionError("scratch-tip sentinel should fail before creating directories")
+
+    monkeypatch.setattr(Path, "mkdir", fail_if_sentinel_mutator_reaches_mkdir)
+
+    with pytest.raises(RuntimeError, match="HERMES_KANBAN_DB only isolates sqlite DB writes"):
+        kb._mark_scratch_tip_shown()
+
+
 def test_remove_board_rejects_unisolated_pytest_root_before_path_access(monkeypatch):
     monkeypatch.delenv("HERMES_KANBAN_HOME", raising=False)
     monkeypatch.delenv("HERMES_KANBAN_DB", raising=False)

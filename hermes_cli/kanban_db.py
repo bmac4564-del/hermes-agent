@@ -3326,6 +3326,7 @@ def _mark_scratch_tip_shown() -> None:
     """
     try:
         path = _scratch_tip_sentinel_path()
+        _ensure_pytest_kanban_filesystem_path_isolated(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch(exist_ok=True)
     except OSError:

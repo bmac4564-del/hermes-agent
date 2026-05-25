@@ -2,10 +2,27 @@
 
 import json
 import os
+import builtins
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from gateway import status
+
+
+def test_build_runtime_import_authority_does_not_swallow_runtime_errors(monkeypatch):
+    original_import = builtins.__import__
+
+    def fail_hermes_cli_import(name, *args, **kwargs):
+        if name == "hermes_cli":
+            raise RuntimeError("unexpected import failure")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fail_hermes_cli_import)
+
+    with pytest.raises(RuntimeError, match="unexpected import failure"):
+        status._build_runtime_import_authority()
 
 
 class TestGatewayPidState:

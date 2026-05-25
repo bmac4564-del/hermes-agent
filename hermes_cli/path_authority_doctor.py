@@ -14,6 +14,17 @@ from typing import Any
 
 
 SEVERITY_RANK = {"OK": 0, "P2": 1, "P1": 2, "P0": 3}
+UNKNOWN_SEVERITY_FALLBACK = "P0"
+
+
+def _severity_rank(severity: str) -> int:
+    """Return a fail-closed rank for check severities.
+
+    Unknown severities can appear when newer check producers feed older report
+    readers. Treat them as P0 instead of crashing or silently downgrading the
+    failed check to OK.
+    """
+    return SEVERITY_RANK.get(severity, SEVERITY_RANK[UNKNOWN_SEVERITY_FALLBACK])
 UNIT_NAMES = {
     "gateway": "hermes-gateway.service",
     "webui": "hermes-webui.service",
@@ -156,8 +167,8 @@ class PathAuthorityReport:
     def overall_severity(self) -> str:
         severity = "OK"
         for check in self.failed_checks():
-            if SEVERITY_RANK[check.severity] > SEVERITY_RANK[severity]:
-                severity = check.severity
+            if _severity_rank(check.severity) > SEVERITY_RANK[severity]:
+                severity = check.severity if check.severity in SEVERITY_RANK else UNKNOWN_SEVERITY_FALLBACK
         return severity
 
     def failed_checks(self) -> list[CheckResult]:
@@ -166,7 +177,7 @@ class PathAuthorityReport:
     def exit_code(self, *, strict: bool) -> int:
         if strict:
             return 1 if self.failed_checks() else 0
-        return 1 if any(check.severity == "P0" for check in self.failed_checks()) else 0
+        return 1 if any(_severity_rank(check.severity) >= SEVERITY_RANK["P0"] for check in self.failed_checks()) else 0
 
     def to_report(self) -> dict[str, Any]:
         return {
