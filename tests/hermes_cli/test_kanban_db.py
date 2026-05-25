@@ -64,7 +64,7 @@ def test_connect_rejects_false_temp_prefix_under_pytest(monkeypatch):
     monkeypatch.delenv("HERMES_KANBAN_HOME", raising=False)
     monkeypatch.delenv("HERMES_KANBAN_DB", raising=False)
     monkeypatch.delenv("HERMES_KANBAN_BOARD", raising=False)
-    false_temp_home = Path("/tmpnotreallysafe")
+    false_temp_home = Path("/tmpnotreallysafe")  # noqa: S108 - deliberate pseudo-temp sentinel
     monkeypatch.setattr(Path, "home", lambda: false_temp_home)
     monkeypatch.setenv("HERMES_HOME", str(false_temp_home / ".hermes"))
 
