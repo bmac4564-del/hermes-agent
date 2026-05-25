@@ -214,10 +214,11 @@ def _build_pid_record() -> dict:
 def _build_runtime_import_authority() -> dict[str, Any]:
     try:
         import hermes_cli
-
-        hermes_cli_file = str(Path(hermes_cli.__file__).resolve())
-    except Exception:
+    except (ImportError, ModuleNotFoundError):
         hermes_cli_file = None
+    else:
+        hermes_cli_path = getattr(hermes_cli, "__file__", None)
+        hermes_cli_file = str(Path(hermes_cli_path).resolve()) if hermes_cli_path else None
 
     hermes_home = get_hermes_home()
     return {

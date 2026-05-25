@@ -110,6 +110,30 @@ def test_gateway_execstart_replace_is_p0(tmp_path):
     assert report.overall_severity == "P0"
 
 
+def test_unknown_failed_severity_does_not_crash_report_status(tmp_path):
+    report = pad.PathAuthorityReport(
+        expected_agent_dir=None,
+        paths_env=pad.ParsedPathsEnv(
+            path=tmp_path / "paths.env",
+            exists=False,
+            values={},
+            redacted={},
+        ),
+        units={},
+        checks=[
+            pad.CheckResult(
+                id="future_check",
+                severity="FUTURE",
+                status="fail",
+                message="new severity from a future checker",
+            )
+        ],
+    )
+
+    assert report.overall_severity == "P0"
+    assert report.exit_code(strict=False) == 1
+
+
 def test_gateway_path_authority_requires_exec_and_workdir(tmp_path):
     target = tmp_path / "agent"
     stale = tmp_path / "stale-agent"
