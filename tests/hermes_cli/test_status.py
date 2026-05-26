@@ -45,6 +45,87 @@ def test_show_status_termux_gateway_section_skips_systemctl(monkeypatch, capsys,
     assert "systemd (user)" not in output
 
 
+def test_show_status_reports_unknown_instead_of_stopped_for_inaccessible_systemd(monkeypatch, capsys, tmp_path):
+    from hermes_cli import status as status_mod
+    import hermes_cli.auth as auth_mod
+    import hermes_cli.gateway as gateway_mod
+
+    monkeypatch.setattr(status_mod, "get_env_path", lambda: tmp_path / ".env", raising=False)
+    monkeypatch.setattr(status_mod, "get_hermes_home", lambda: tmp_path, raising=False)
+    monkeypatch.setattr(status_mod, "load_config", lambda: {"model": {"default": "gpt-5.5", "provider": "openai-codex"}}, raising=False)
+    monkeypatch.setattr(status_mod, "resolve_requested_provider", lambda requested=None: "openai-codex", raising=False)
+    monkeypatch.setattr(status_mod, "resolve_provider", lambda requested=None, **kwargs: "openai-codex", raising=False)
+    monkeypatch.setattr(status_mod, "provider_label", lambda provider: "OpenAI Codex", raising=False)
+    monkeypatch.setattr(auth_mod, "get_nous_auth_status", lambda: {}, raising=False)
+    monkeypatch.setattr(auth_mod, "get_codex_auth_status", lambda: {}, raising=False)
+    monkeypatch.setattr(auth_mod, "get_qwen_auth_status", lambda: {}, raising=False)
+    monkeypatch.setattr(auth_mod, "get_xai_oauth_auth_status", lambda: {}, raising=False)
+    monkeypatch.setattr(
+        gateway_mod,
+        "get_gateway_runtime_snapshot",
+        lambda: gateway_mod.GatewayRuntimeSnapshot(
+            manager="systemd (user, inaccessible)",
+            service_installed=True,
+            service_running=False,
+            gateway_pids=(),
+            service_scope="user",
+            status_unknown=True,
+            authority="systemd inaccessible",
+            status_detail="fresh runtime state is unavailable",
+        ),
+        raising=False,
+    )
+
+    status_mod.show_status(SimpleNamespace(all=False, deep=False))
+
+    output = capsys.readouterr().out
+    assert "Status:       ? unknown" in output
+    assert "Manager:      systemd (user, inaccessible)" in output
+    assert "Authority:    systemd inaccessible" in output
+    assert "Note:         fresh runtime state is unavailable" in output
+    assert "Status:       ✗ stopped" not in output
+
+
+def test_show_status_runtime_state_running_does_not_report_service_stopped(monkeypatch, capsys, tmp_path):
+    from hermes_cli import status as status_mod
+    import hermes_cli.auth as auth_mod
+    import hermes_cli.gateway as gateway_mod
+
+    monkeypatch.setattr(status_mod, "get_env_path", lambda: tmp_path / ".env", raising=False)
+    monkeypatch.setattr(status_mod, "get_hermes_home", lambda: tmp_path, raising=False)
+    monkeypatch.setattr(status_mod, "load_config", lambda: {"model": {"default": "gpt-5.5", "provider": "openai-codex"}}, raising=False)
+    monkeypatch.setattr(status_mod, "resolve_requested_provider", lambda requested=None: "openai-codex", raising=False)
+    monkeypatch.setattr(status_mod, "resolve_provider", lambda requested=None, **kwargs: "openai-codex", raising=False)
+    monkeypatch.setattr(status_mod, "provider_label", lambda provider: "OpenAI Codex", raising=False)
+    monkeypatch.setattr(auth_mod, "get_nous_auth_status", lambda: {}, raising=False)
+    monkeypatch.setattr(auth_mod, "get_codex_auth_status", lambda: {}, raising=False)
+    monkeypatch.setattr(auth_mod, "get_qwen_auth_status", lambda: {}, raising=False)
+    monkeypatch.setattr(auth_mod, "get_xai_oauth_auth_status", lambda: {}, raising=False)
+    monkeypatch.setattr(
+        gateway_mod,
+        "get_gateway_runtime_snapshot",
+        lambda: gateway_mod.GatewayRuntimeSnapshot(
+            manager="systemd (user, inaccessible)",
+            service_installed=True,
+            service_running=False,
+            gateway_pids=(70604,),
+            service_scope="user",
+            runtime_state_running=True,
+            runtime_state_fresh=True,
+            authority="fresh gateway_state.json",
+            status_detail="systemd is not accessible from this process",
+        ),
+        raising=False,
+    )
+
+    status_mod.show_status(SimpleNamespace(all=False, deep=False))
+
+    output = capsys.readouterr().out
+    assert "Status:       ✓ running" in output
+    assert "Authority:    fresh gateway_state.json" in output
+    assert "Service:      installed but stopped" not in output
+
+
 def test_show_status_reports_nous_auth_error(monkeypatch, capsys, tmp_path):
     from hermes_cli import status as status_mod
     import hermes_cli.auth as auth_mod

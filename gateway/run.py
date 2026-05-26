@@ -15241,7 +15241,31 @@ class GatewayRunner:
             out["tools.registry_generation"] = getattr(registry, "_generation", None)
         except Exception:
             out["tools.registry_generation"] = None
+        out["identity.soul_md"] = cls._soul_md_cache_fingerprint()
         return out
+
+    @staticmethod
+    def _soul_md_cache_fingerprint() -> dict[str, Any] | None:
+        """Return the SOUL.md file fingerprint used to invalidate cached agents."""
+        try:
+            import hashlib
+
+            from hermes_constants import get_hermes_home
+
+            soul_path = get_hermes_home() / "SOUL.md"
+            stat_result = soul_path.stat()
+            content_hash = hashlib.sha256(soul_path.read_bytes()).hexdigest()
+        except FileNotFoundError:
+            return None
+        except OSError:
+            return None
+
+        return {
+            "path": str(soul_path),
+            "mtime_ns": stat_result.st_mtime_ns,
+            "size": stat_result.st_size,
+            "sha256": content_hash,
+        }
 
     @staticmethod
     def _agent_config_signature(

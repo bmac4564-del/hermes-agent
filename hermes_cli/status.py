@@ -446,16 +446,28 @@ def show_status(args):
 
         snapshot = get_gateway_runtime_snapshot()
         is_running = snapshot.running
-        print(f"  Status:       {check_mark(is_running)} {'running' if is_running else 'stopped'}")
+        if getattr(snapshot, "status_unknown", False):
+            print("  Status:       ? unknown")
+        else:
+            print(f"  Status:       {check_mark(is_running)} {'running' if is_running else 'stopped'}")
         print(f"  Manager:      {snapshot.manager}")
         if snapshot.gateway_pids:
             print(f"  PID(s):       {_format_gateway_pids(snapshot.gateway_pids)}")
+        if getattr(snapshot, "authority", None):
+            print(f"  Authority:    {snapshot.authority}")
+        if getattr(snapshot, "status_detail", None):
+            print(f"  Note:         {snapshot.status_detail}")
         if snapshot.has_process_service_mismatch:
             print("  Service:      installed but not managing the current running gateway")
         elif _is_termux() and not snapshot.gateway_pids:
             print("  Start with:   hermes gateway")
             print("  Note:         Android may stop background jobs when Termux is suspended")
-        elif snapshot.service_installed and not snapshot.service_running:
+        elif (
+            snapshot.service_installed
+            and not snapshot.service_running
+            and not getattr(snapshot, "runtime_state_running", False)
+            and not getattr(snapshot, "status_unknown", False)
+        ):
             print("  Service:      installed but stopped")
     except Exception:
         if _is_termux():

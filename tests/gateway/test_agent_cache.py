@@ -11,6 +11,7 @@ Verifies that the agent cache correctly:
 
 import hashlib
 import json
+import os
 import threading
 from unittest.mock import MagicMock, patch
 
@@ -278,6 +279,56 @@ class TestExtractCacheBustingConfig:
         out = GatewayRunner._extract_cache_busting_config({})
 
         assert out["tools.registry_generation"] == 12345
+
+    def test_extract_includes_soul_md_fingerprint(self, tmp_path, monkeypatch):
+        from gateway.run import GatewayRunner
+
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        before = GatewayRunner._extract_cache_busting_config({})
+
+        soul_path = tmp_path / "SOUL.md"
+        soul_path.write_text("fresh identity\n", encoding="utf-8")
+        after = GatewayRunner._extract_cache_busting_config({})
+
+        assert before["identity.soul_md"] is None
+        assert after["identity.soul_md"]["size"] == len("fresh identity\n")
+        assert after["identity.soul_md"]["sha256"]
+        assert before != after
+
+    def test_soul_md_same_size_same_mtime_edit_busts_signature(self, tmp_path, monkeypatch):
+        from gateway.run import GatewayRunner
+
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        soul_path = tmp_path / "SOUL.md"
+        fixed_ns = 1_900_000_000_000_000_000
+        runtime = {"api_key": "k", "base_url": "u", "provider": "p"}
+
+        soul_path.write_text("identity-one\n", encoding="utf-8")
+        os.utime(soul_path, ns=(fixed_ns, fixed_ns))
+        before_keys = GatewayRunner._extract_cache_busting_config({})
+        before_sig = GatewayRunner._agent_config_signature(
+            "m",
+            runtime,
+            [],
+            "",
+            cache_keys=before_keys,
+        )
+
+        soul_path.write_text("identity-two\n", encoding="utf-8")
+        os.utime(soul_path, ns=(fixed_ns, fixed_ns))
+        after_keys = GatewayRunner._extract_cache_busting_config({})
+        after_sig = GatewayRunner._agent_config_signature(
+            "m",
+            runtime,
+            [],
+            "",
+            cache_keys=after_keys,
+        )
+
+        assert before_keys["identity.soul_md"]["size"] == after_keys["identity.soul_md"]["size"]
+        assert before_keys["identity.soul_md"]["mtime_ns"] == after_keys["identity.soul_md"]["mtime_ns"]
+        assert before_keys["identity.soul_md"]["sha256"] != after_keys["identity.soul_md"]["sha256"]
+        assert before_sig != after_sig
 
     def test_full_round_trip_busts_cache_on_real_edit(self):
         """End-to-end: simulate a config edit on main and verify the
