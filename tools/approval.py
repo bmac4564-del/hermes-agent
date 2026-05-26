@@ -236,6 +236,36 @@ HARDLINE_PATTERNS_COMPILED = [
     for pattern, description in HARDLINE_PATTERNS
 ]
 
+GATEWAY_SELF_RESTART_DESCRIPTION = (
+    "gateway self-restart from inside hermes-gateway.service"
+)
+
+GATEWAY_SELF_RESTART_PATTERNS_COMPILED = [
+    re.compile(
+        r'\bsystemctl\b'
+        r'(?=[^\n;&|]*\b(?:stop|restart)\b)'
+        r'(?=[^\n;&|]*\bhermes-gateway(?:\.service)?\b)',
+        _RE_FLAGS,
+    ),
+    re.compile(r'\bhermes\s+gateway\s+(?:stop|restart)\b', _RE_FLAGS),
+]
+
+
+def _is_running_inside_gateway_service_cgroup() -> bool:
+    """Return True when this process is owned by hermes-gateway.service."""
+    try:
+        with open("/proc/self/cgroup", "r", encoding="utf-8", errors="replace") as fh:
+            return "hermes-gateway.service" in fh.read()
+    except OSError:
+        return False
+
+
+def _is_gateway_self_restart_command(normalized_command: str) -> bool:
+    return any(
+        pattern.search(normalized_command)
+        for pattern in GATEWAY_SELF_RESTART_PATTERNS_COMPILED
+    )
+
 
 # =========================================================================
 # Sudo stdin guard — block password guessing via "sudo -S"
@@ -278,6 +308,11 @@ def detect_hardline_command(command: str) -> tuple:
         (is_hardline, description) or (False, None)
     """
     normalized = _normalize_command_for_detection(command).lower()
+    if (
+        _is_gateway_self_restart_command(normalized)
+        and _is_running_inside_gateway_service_cgroup()
+    ):
+        return (True, GATEWAY_SELF_RESTART_DESCRIPTION)
     for pattern_re, description in HARDLINE_PATTERNS_COMPILED:
         if pattern_re.search(normalized):
             return (True, description)

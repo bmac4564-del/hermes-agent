@@ -892,4 +892,3 @@ class TestEnvWriteDenylist:
         # But the write path still refuses to update it
         with pytest.raises(ValueError, match="denylist"):
             save_env_value("LD_PRELOAD", "/tmp/evil.so")
-

@@ -2385,62 +2385,68 @@ class TestDashboardPluginStaticAssetAllowlist:
     """
 
     @pytest.fixture(autouse=True)
-    def _setup_test_client(self, monkeypatch, _isolate_hermes_home):
-        try:
-            from starlette.testclient import TestClient
-        except ImportError:
-            pytest.skip("fastapi/starlette not installed")
+    def _setup_plugin_assets(self, tmp_path, monkeypatch, _isolate_hermes_home):
+        import hermes_cli.web_server as web_server
 
-        from hermes_cli.web_server import app
+        dashboard_dir = tmp_path / "example" / "dashboard"
+        pycache_dir = dashboard_dir / "__pycache__"
+        pycache_dir.mkdir(parents=True)
+        (dashboard_dir / "plugin_api.py").write_text("SECRET = True\n", encoding="utf-8")
+        (pycache_dir / "plugin_api.cpython-311.pyc").write_bytes(b"\0\0")
+        (dashboard_dir / "manifest.json").write_text(
+            json.dumps({"name": "example"}), encoding="utf-8"
+        )
+        (dashboard_dir / "app.js").write_text("console.log('ok')\n", encoding="utf-8")
 
-        self.client = TestClient(app)
+        monkeypatch.setattr(
+            web_server,
+            "_get_dashboard_plugins",
+            lambda force_rescan=False: [{"name": "example", "_dir": str(dashboard_dir)}],
+        )
+        self.web_server = web_server
 
-    def test_python_source_is_404(self):
+    async def _serve(self, plugin_name: str, file_path: str):
+        return await self.web_server.serve_plugin_asset(plugin_name, file_path)
+
+    @pytest.mark.asyncio
+    async def test_python_source_is_404(self):
         """The example plugin's ``plugin_api.py`` must NOT be served as
         a static asset, even though the file exists under the plugin's
         dashboard directory. Suffix not in the allowlist → 404."""
-        resp = self.client.get("/dashboard-plugins/example/plugin_api.py")
-        assert resp.status_code == 404
+        with pytest.raises(self.web_server.HTTPException) as exc:
+            await self._serve("example", "plugin_api.py")
+        assert exc.value.status_code == 404
 
-    def test_pycache_is_404(self):
+    @pytest.mark.asyncio
+    async def test_pycache_is_404(self):
         """Same protection for compiled Python (``.pyc``) inside the
         plugin's ``__pycache__/``. Real plugins ship these as a
         side-effect of running tests / dashboard once."""
-        # __pycache__ files are only generated after the api file has
-        # been imported once. Use the path the example plugin actually
-        # generates during the dashboard test boot.
-        resp = self.client.get(
-            "/dashboard-plugins/example/__pycache__/plugin_api.cpython-311.pyc"
-        )
-        # 404 either way (file may not exist on this CI Python version);
-        # what matters is we never get a 200 with the bytes.
-        assert resp.status_code == 404
+        with pytest.raises(self.web_server.HTTPException) as exc:
+            await self._serve("example", "__pycache__/plugin_api.cpython-311.pyc")
+        assert exc.value.status_code == 404
 
-    def test_manifest_json_still_served(self):
+    @pytest.mark.asyncio
+    async def test_manifest_json_still_served(self):
         """JSON files remain browser-fetchable — manifests, localized
         data, source maps, etc. all sit in this bucket."""
-        resp = self.client.get("/dashboard-plugins/example/manifest.json")
-        assert resp.status_code == 200
-        assert resp.headers["content-type"].startswith("application/json")
-        # And the body is actually the manifest, not the SPA fallback.
-        body = resp.json()
-        assert body.get("name") == "example"
+        resp = await self._serve("example", "manifest.json")
+        assert resp.media_type == "application/json"
+        assert Path(resp.path).name == "manifest.json"
 
-    def test_unknown_plugin_is_404(self):
+    @pytest.mark.asyncio
+    async def test_unknown_plugin_is_404(self):
         """Existing behaviour preserved: nonexistent plugin name → 404."""
-        resp = self.client.get(
-            "/dashboard-plugins/_definitely_not_a_plugin_/manifest.json"
-        )
-        assert resp.status_code == 404
+        with pytest.raises(self.web_server.HTTPException) as exc:
+            await self._serve("_definitely_not_a_plugin_", "manifest.json")
+        assert exc.value.status_code == 404
 
-    def test_path_traversal_still_blocked(self):
+    @pytest.mark.asyncio
+    async def test_path_traversal_still_blocked(self):
         """The allowlist is on top of the existing ``.resolve()`` /
         ``is_relative_to()`` check — a ``.js`` named file at an
         out-of-base path is still rejected as traversal, not served."""
-        resp = self.client.get(
-            "/dashboard-plugins/example/..%2Fplugin_api.py"
-        )
-        # 403 traversal-blocked OR 404 (depending on URL decode order)
-        # — never 200.
-        assert resp.status_code in (403, 404)
+        with pytest.raises(self.web_server.HTTPException) as exc:
+            await self._serve("example", "../plugin_api.py")
+        assert exc.value.status_code == 403
 
