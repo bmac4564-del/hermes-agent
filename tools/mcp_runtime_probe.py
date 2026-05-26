@@ -473,7 +473,7 @@ async def probe_servers(
     entries: list[dict[str, Any]] = []
     for server in servers:
         missing_auth = bool(server.bearer_env_var and not os.getenv(server.bearer_env_var))
-        if skip_google_drive_auth_needed and missing_auth and _is_google_drive(server):
+        if skip_google_drive_auth_needed and missing_auth:
             continue
         if not sdk_available and server.enabled:
             entry = server.redacted_summary()

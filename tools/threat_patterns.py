@@ -42,6 +42,7 @@ of "ignore all instructions").  This mirrors the fix applied to
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import List, Optional, Tuple
 
 # Each entry: (regex, pattern_id, scope)
@@ -146,6 +147,21 @@ _EMOJI_NEIGHBOUR_CP_RANGES = (
     (0x20E3, 0x20E3),
 )
 _VARIATION_SELECTOR_CP = 0xFE0F
+_LANGUAGE_ZWNJ_CP_RANGES = (
+    (0x0600, 0x06FF),  # Arabic, Persian, Urdu
+    (0x0750, 0x077F),  # Arabic supplement
+    (0x08A0, 0x08FF),  # Arabic extended
+    (0x0900, 0x097F),  # Devanagari
+    (0x0980, 0x09FF),  # Bengali
+    (0x0A00, 0x0A7F),  # Gurmukhi
+    (0x0A80, 0x0AFF),  # Gujarati
+    (0x0B00, 0x0B7F),  # Odia
+    (0x0B80, 0x0BFF),  # Tamil
+    (0x0C00, 0x0C7F),  # Telugu
+    (0x0C80, 0x0CFF),  # Kannada
+    (0x0D00, 0x0D7F),  # Malayalam
+    (0x0D80, 0x0DFF),  # Sinhala
+)
 
 
 def _is_emoji_cp(cp: int) -> bool:
@@ -172,6 +188,33 @@ def _strip_legitimate_emoji_zwj(content: str) -> str:
     cleaned: list[str] = []
     for idx, ch in enumerate(content):
         if ch == '\u200d' and _zwj_has_emoji_neighbour(content, idx):
+            continue
+        cleaned.append(ch)
+    return ''.join(cleaned)
+
+
+def _is_language_zwnj_neighbour(ch: str) -> bool:
+    cp = ord(ch)
+    if not any(lo <= cp <= hi for lo, hi in _LANGUAGE_ZWNJ_CP_RANGES):
+        return False
+    return unicodedata.category(ch)[0] in {"L", "M"}
+
+
+def _zwnj_has_language_neighbours(text: str, idx: int) -> bool:
+    return (
+        idx > 0
+        and idx + 1 < len(text)
+        and _is_language_zwnj_neighbour(text[idx - 1])
+        and _is_language_zwnj_neighbour(text[idx + 1])
+    )
+
+
+def _strip_legitimate_language_zwnj(content: str) -> str:
+    if '\u200c' not in content:
+        return content
+    cleaned: list[str] = []
+    for idx, ch in enumerate(content):
+        if ch == '\u200c' and _zwnj_has_language_neighbours(content, idx):
             continue
         cleaned.append(ch)
     return ''.join(cleaned)
@@ -246,7 +289,7 @@ def scan_for_threats(content: str, scope: str = "context") -> List[str]:
 
     # Invisible unicode — single pass through the content set, not 17
     # ``in`` lookups.
-    char_set = set(_strip_legitimate_emoji_zwj(content))
+    char_set = set(_strip_legitimate_language_zwnj(_strip_legitimate_emoji_zwj(content)))
     invisible_hits = char_set & INVISIBLE_CHARS
     for ch in invisible_hits:
         findings.append(f"invisible_unicode_U+{ord(ch):04X}")

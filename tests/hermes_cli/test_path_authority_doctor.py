@@ -259,6 +259,25 @@ def test_runtime_authority_rejects_out_of_bounds_optional_hermes_cli_file(tmp_pa
     assert check.severity == "P0"
 
 
+def test_runtime_authority_rejects_symlink_escape_from_expected_root(tmp_path):
+    target = tmp_path / "agent"
+    outside = tmp_path / "outside"
+    target.mkdir()
+    outside.mkdir()
+    link = target / "link-outside"
+    link.symlink_to(outside, target_is_directory=True)
+    escaped_gateway_file = link / "gateway" / "status.py"
+    runtime_authority = {
+        "project_root": str(target),
+        "gateway_file": str(escaped_gateway_file),
+    }
+
+    check = pad._check_runtime_authority(runtime_authority, target)
+
+    assert check.status == "fail"
+    assert check.severity == "P0"
+
+
 def test_live_runtime_authority_missing_is_p0_when_live_checks_enabled(tmp_path, monkeypatch):
     target = tmp_path / "agent"
     target.mkdir()
@@ -383,6 +402,39 @@ def test_webui_graphify_authority_detects_systemd_env_drift(tmp_path):
             path=tmp_path / "hermes-webui.service",
             exists=True,
             dropins=[],
+            effective=pad.EffectiveUnit(
+                environment={
+                    "GRAPHIFY_OUTPUT_DIR": str(tmp_path / "vault" / "Graphify"),
+                    "GRAPHIFY_GRAPH_JSON": str(tmp_path / "vault" / "Graphify" / "combined-graph.json"),
+                }
+            ),
+        )
+    }
+
+    checks = pad._check_webui_graphify_authority(paths_env, units)
+
+    assert checks[0].id == "webui_graphify_path_authority"
+    assert checks[0].severity == "P1"
+
+
+def test_webui_graphify_authority_checks_dropin_only_units(tmp_path):
+    expected_graph = tmp_path / "artifacts" / "graph.json"
+    paths_env = pad.ParsedPathsEnv(
+        path=tmp_path / "paths.env",
+        exists=True,
+        values={
+            "GRAPHIFY_OUTPUT_DIR": str(expected_graph.parent),
+            "GRAPHIFY_GRAPH_JSON": str(expected_graph),
+        },
+        redacted={},
+    )
+    units = {
+        "webui": pad.UnitReport(
+            role="webui",
+            name="hermes-webui.service",
+            path=tmp_path / "missing-hermes-webui.service",
+            exists=False,
+            dropins=[tmp_path / "hermes-webui.service.d" / "10-graphify.conf"],
             effective=pad.EffectiveUnit(
                 environment={
                     "GRAPHIFY_OUTPUT_DIR": str(tmp_path / "vault" / "Graphify"),

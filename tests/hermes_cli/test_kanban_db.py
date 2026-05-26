@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import concurrent.futures
 import os
 import sqlite3
@@ -20,6 +21,9 @@ def kanban_home(tmp_path, monkeypatch):
     home = tmp_path / ".hermes"
     home.mkdir()
     monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.delenv("HERMES_KANBAN_DB", raising=False)
+    monkeypatch.delenv("HERMES_KANBAN_WORKSPACES_ROOT", raising=False)
+    monkeypatch.delenv("HERMES_KANBAN_BOARD", raising=False)
     # Test runners may inherit a live workstation HERMES_KANBAN_HOME. Pin the
     # kanban root as well so this fixture is hermetic under the same env shape
     # used by the gateway service.
@@ -351,7 +355,7 @@ def test_default_spawn_rejects_kanban_db_as_only_pytest_isolation(tmp_path, monk
         kb._default_spawn(task, str(tmp_path), board="test-board")
 
 
-def test_scratch_tip_sentinel_rejects_kanban_db_as_only_pytest_isolation(tmp_path, monkeypatch):
+def test_scratch_tip_sentinel_write_is_best_effort_when_isolation_fails(tmp_path, monkeypatch):
     monkeypatch.delenv("HERMES_KANBAN_HOME", raising=False)
     monkeypatch.setenv("HERMES_KANBAN_DB", str(tmp_path / "isolated-kanban.db"))
     monkeypatch.delenv("HERMES_KANBAN_BOARD", raising=False)
@@ -364,8 +368,7 @@ def test_scratch_tip_sentinel_rejects_kanban_db_as_only_pytest_isolation(tmp_pat
 
     monkeypatch.setattr(Path, "mkdir", fail_if_sentinel_mutator_reaches_mkdir)
 
-    with pytest.raises(RuntimeError, match="HERMES_KANBAN_DB only isolates sqlite DB writes"):
-        kb._mark_scratch_tip_shown()
+    kb._mark_scratch_tip_shown()
 
 
 def test_remove_board_rejects_unisolated_pytest_root_before_path_access(monkeypatch):
@@ -695,9 +698,14 @@ def test_schedule_task_parks_time_delay_without_dispatching(kanban_home):
 
 
 def test_path_is_under_helper_has_single_canonical_signature():
-    source = Path(kb.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(Path(kb.__file__).read_text(encoding="utf-8"))
+    matches = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "_path_is_under"
+    ]
 
-    assert source.count("def _path_is_under(") == 1
+    assert len(matches) == 1
 
 
 def test_unblock_scheduled_rechecks_parent_gate(kanban_home):
@@ -1551,6 +1559,13 @@ def test_scan_workspace_authority_flags_unset_worktree_path(kanban_home):
     assert [(f.task_id, f.classification, f.blocks_dispatch) for f in findings] == [
         (task_id, "active_empty_worktree_path", True)
     ]
+
+
+def test_path_list_env_rejects_relative_workspace_authority_root(monkeypatch):
+    monkeypatch.setenv("HERMES_KANBAN_APPROVED_WORKSPACE_ROOTS", "relative/workspace")
+
+    with pytest.raises(ValueError, match="HERMES_KANBAN_APPROVED_WORKSPACE_ROOTS"):
+        kb._path_list_env("HERMES_KANBAN_APPROVED_WORKSPACE_ROOTS")
 
 
 def test_dispatch_does_not_block_production_task_only_because_title_is_proja(

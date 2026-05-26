@@ -3372,7 +3372,7 @@ def _mark_scratch_tip_shown() -> None:
         _ensure_pytest_kanban_filesystem_path_isolated(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch(exist_ok=True)
-    except OSError:
+    except (OSError, RuntimeError):
         pass
 
 
@@ -4033,11 +4033,16 @@ def _path_list_env(var_name: str) -> list[Path]:
     raw = os.environ.get(var_name, "").strip()
     if not raw:
         return []
-    return [
-        _canonical_workspace_path(item)
-        for item in raw.split(os.pathsep)
-        if item.strip()
-    ]
+    out: list[Path] = []
+    for item in raw.split(os.pathsep):
+        item = item.strip()
+        if not item:
+            continue
+        candidate = Path(item).expanduser()
+        if not candidate.is_absolute():
+            raise ValueError(f"{var_name} entries must be absolute paths: {item!r}")
+        out.append(candidate.resolve(strict=False))
+    return out
 
 
 def _agent_repo_root_for_workspace_authority() -> Path:

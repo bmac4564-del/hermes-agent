@@ -763,6 +763,7 @@ class TestGatewayServiceDetection:
         system_unit = SimpleNamespace(exists=lambda: False)
 
         monkeypatch.setattr(gateway_cli, "supports_systemd_services", lambda: False)
+        monkeypatch.setattr(gateway_cli, "is_linux", lambda: True)
         monkeypatch.setattr(gateway_cli, "is_termux", lambda: False)
         monkeypatch.setattr(gateway_cli, "is_macos", lambda: False)
         monkeypatch.setattr(gateway_cli, "is_linux", lambda: True)
@@ -1303,6 +1304,7 @@ class TestGatewaySystemServiceRouting:
         monkeypatch.setattr(gateway_cli, "is_termux", lambda: False)
         monkeypatch.setattr(gateway_cli, "is_macos", lambda: False)
         monkeypatch.setattr(gateway_cli, "is_windows", lambda: False)
+        monkeypatch.setattr(gateway_cli, "is_linux", lambda: True)
         monkeypatch.setattr(
             gateway_cli,
             "get_systemd_unit_path",

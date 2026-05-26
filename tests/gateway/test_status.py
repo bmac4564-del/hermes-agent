@@ -34,7 +34,7 @@ def test_build_runtime_import_authority_survives_deleted_cwd(monkeypatch):
     authority = status._build_runtime_import_authority()
 
     assert authority["cwd"] is None
-    assert authority["gateway_file"].endswith("gateway/status.py")
+    assert Path(authority["gateway_file"]).parts[-2:] == ("gateway", "status.py")
 
 
 def test_write_runtime_status_backfills_full_schema_for_existing_payload(tmp_path, monkeypatch):

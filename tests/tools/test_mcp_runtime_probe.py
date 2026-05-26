@@ -451,6 +451,25 @@ def test_cli_default_skips_google_drive_auth_needed_entries(monkeypatch):
     assert report["status_counts"] == {}
 
 
+def test_skip_auth_needed_skips_non_google_missing_bearer_auth_entries(monkeypatch):
+    from tools.mcp_runtime_probe import NormalizedMCPServer, probe_servers
+
+    server = NormalizedMCPServer(
+        source="codex",
+        name="github-readonly",
+        config={},
+        transport="http",
+        url="https://api.githubcopilot.com/mcp/readonly",
+        bearer_env_var="GITHUB_PERSONAL_ACCESS_TOKEN",
+    )
+    monkeypatch.delenv("GITHUB_PERSONAL_ACCESS_TOKEN", raising=False)
+
+    report = _run(probe_servers([server], skip_google_drive_auth_needed=True))
+
+    assert report["servers"] == []
+    assert report["status_counts"] == {}
+
+
 def test_default_source_loader_filters_runtime(monkeypatch, tmp_path):
     from tools.mcp_runtime_probe import load_default_config_sources
 

@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from hermes_constants import display_hermes_home
-from tools.threat_patterns import INVISIBLE_CHARS
+from tools.threat_patterns import INVISIBLE_CHARS, _strip_legitimate_language_zwnj
 
 logger = logging.getLogger(__name__)
 
@@ -159,22 +159,22 @@ def _strip_cron_safe_constructs(prompt: str) -> str:
     Allows the bundled GitHub skill fallback without opening a blanket
     exemption for arbitrary Authorization-header exfiltration.
     """
-    github_auth_header = re.search(
+    return re.sub(
         rf'curl\s+[^\n]*(?:-H|--header)\s+["\']Authorization:\s*token\s+{_CRON_SECRET_VAR_RE}["\']'
         r'\s+["\']?https://api\.github\.com(?:/|\b)',
+        "curl https://api.github.com/user",
         prompt,
-        re.IGNORECASE,
+        flags=re.IGNORECASE,
     )
-    if github_auth_header:
-        return prompt.replace(github_auth_header.group(0), "curl https://api.github.com/user")
-    return prompt
 
 
 def _check_invisible_unicode(prompt: str) -> str:
     """Return an error string if the prompt contains invisible-unicode
     injection markers (ZWJ inside legitimate emoji sequences is allowed).
     """
-    prompt_for_invisible_scan = _strip_legitimate_emoji_zwj(prompt)
+    prompt_for_invisible_scan = _strip_legitimate_language_zwnj(
+        _strip_legitimate_emoji_zwj(prompt)
+    )
     for char in _CRON_INVISIBLE_CHARS:
         if char in prompt_for_invisible_scan:
             return f"Blocked: prompt contains invisible unicode U+{ord(char):04X} (possible injection)."

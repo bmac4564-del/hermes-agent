@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sys
 import time
+import math
 from datetime import datetime, timezone
 from typing import Any
 
@@ -25,7 +26,10 @@ def _env_float(name: str, default: float) -> float:
     if raw is None or not str(raw).strip():
         return default
     try:
-        return float(raw)
+        value = float(raw)
+        if not math.isfinite(value):
+            raise ValueError
+        return value
     except ValueError:
         _ENV_FLOAT_ERRORS.append(f"invalid numeric env {name}={raw!r}")
         return default
@@ -34,9 +38,13 @@ def _env_float(name: str, default: float) -> float:
 HEARTBEAT_INTERVAL = _env_float("HERMES_WATCHDOG_HEARTBEAT_INTERVAL", 15.0)
 HEARTBEAT_STALE = _env_float("HERMES_WATCHDOG_HEARTBEAT_STALE", 45.0)
 STARTUP_GRACE = _env_float("HERMES_WATCHDOG_STARTUP_GRACE", 90.0)
+_forward_progress_default = 1800.0
+_raw_forward_progress_timeout = os.getenv("HERMES_WATCHDOG_FORWARD_PROGRESS_TIMEOUT")
+if _raw_forward_progress_timeout is None or not str(_raw_forward_progress_timeout).strip():
+    _forward_progress_default = _env_float("HERMES_AGENT_TIMEOUT", 1800.0)
 FORWARD_PROGRESS_TIMEOUT = _env_float(
     "HERMES_WATCHDOG_FORWARD_PROGRESS_TIMEOUT",
-    _env_float("HERMES_AGENT_TIMEOUT", 1800.0),
+    _forward_progress_default,
 )
 
 
@@ -61,7 +69,10 @@ def _require_number(payload: dict[str, Any], key: str) -> float:
     value = payload.get(key)
     if value is None or isinstance(value, bool):
         raise ValueError(f"missing numeric field: {key}")
-    return float(value)
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError(f"invalid numeric field: {key}")
+    return number
 
 
 def _payload_pid(payload: dict[str, Any]) -> int:

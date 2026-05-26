@@ -6316,7 +6316,12 @@ class GatewayRunner:
         thread = self._liveness_thread
         if thread and thread.is_alive() and thread is not threading.current_thread():
             thread.join(timeout=timeout)
-        self._liveness_thread = None
+        if thread is None or not thread.is_alive():
+            self._liveness_thread = None
+        else:
+            logger.warning(
+                "Gateway liveness thread did not stop within %.1fs", timeout
+            )
 
     def _create_adapter(
         self, 
@@ -10595,6 +10600,8 @@ class GatewayRunner:
                     with open(config_path, encoding="utf-8") as f:
                         cfg = yaml.safe_load(f) or {}
                 else:
+                    cfg = {}
+                if not isinstance(cfg, dict):
                     cfg = {}
                 # Coerce scalar/None ``model:`` into a dict before mutation —
                 # otherwise ``cfg.setdefault("model", {})`` returns the existing

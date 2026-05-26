@@ -788,6 +788,28 @@ class TestGatewayProtection:
         assert result.get("hardline") is True
         assert "gateway self-restart" in result["message"]
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "systemctl --user restart hermes-gateway-prod.timer",
+            "systemctl --user restart hermes-gateway-prod.socket",
+        ],
+    )
+    def test_systemctl_restart_gateway_non_service_units_not_hardline_inside_gateway_cgroup(
+        self, monkeypatch, command
+    ):
+        monkeypatch.setattr(
+            approval_module,
+            "_is_running_inside_gateway_service_cgroup",
+            lambda: True,
+            raising=False,
+        )
+
+        hardline, desc = approval_module.detect_hardline_command(command)
+
+        assert hardline is False, command
+        assert desc is None
+
     def test_pkill_hermes_detected(self):
         """pkill targeting hermes/gateway processes must be caught."""
         cmd = 'pkill -f "cli.py --gateway"'

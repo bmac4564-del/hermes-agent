@@ -2,6 +2,8 @@
 
 import importlib
 
+import pytest
+
 
 def _runtime_payload(**overrides):
     payload = {
@@ -60,3 +62,31 @@ def test_watchdog_reports_invalid_numeric_env_without_traceback(monkeypatch):
     monkeypatch.setattr(watchdog, "_ENV_FLOAT_ERRORS", ["invalid numeric env HERMES_AGENT_TIMEOUT='slow'"])
 
     assert watchdog.main() == watchdog.EXIT_INVALID_PAYLOAD
+
+
+@pytest.mark.parametrize("raw", ["nan", "inf", "-inf"])
+def test_watchdog_env_float_rejects_non_finite_values(monkeypatch, raw):
+    monkeypatch.setenv("HERMES_WATCHDOG_HEARTBEAT_INTERVAL", raw)
+
+    watchdog = importlib.reload(importlib.import_module("gateway.watchdog_check"))
+
+    assert watchdog.HEARTBEAT_INTERVAL == 15.0
+    assert any("HERMES_WATCHDOG_HEARTBEAT_INTERVAL" in err for err in watchdog._ENV_FLOAT_ERRORS)
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_watchdog_payload_numbers_reject_non_finite_values(value):
+    watchdog = importlib.import_module("gateway.watchdog_check")
+
+    with pytest.raises(ValueError, match="numeric field"):
+        watchdog._require_number({"last_forward_progress_mono": value}, "last_forward_progress_mono")
+
+
+def test_watchdog_override_ignores_invalid_legacy_timeout(monkeypatch):
+    monkeypatch.setenv("HERMES_WATCHDOG_FORWARD_PROGRESS_TIMEOUT", "30")
+    monkeypatch.setenv("HERMES_AGENT_TIMEOUT", "slow")
+
+    watchdog = importlib.reload(importlib.import_module("gateway.watchdog_check"))
+
+    assert watchdog.FORWARD_PROGRESS_TIMEOUT == 30.0
+    assert not any("HERMES_AGENT_TIMEOUT" in err for err in watchdog._ENV_FLOAT_ERRORS)

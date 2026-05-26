@@ -277,7 +277,7 @@ def _is_gateway_self_restart_command(normalized_command: str) -> bool:
             or unit == "hermes-gateway.service"
             or (
                 unit.startswith("hermes-gateway-")
-                and (unit.endswith(".service") or ".service" not in unit)
+                and (unit.endswith(".service") or "." not in unit)
             )
         )
 

@@ -59,6 +59,28 @@ def test_start_liveness_publisher_continues_after_bootstrap_publish_failure(monk
     assert calls == ["publish", "thread"]
 
 
+def test_stop_liveness_thread_preserves_alive_thread_after_join_timeout(caplog):
+    runner = _runner_for_liveness()
+    joined = []
+
+    class StuckThread:
+        def is_alive(self):
+            return True
+
+        def join(self, timeout=None):
+            joined.append(timeout)
+
+    thread = StuckThread()
+    runner._liveness_thread = thread
+
+    with caplog.at_level("WARNING", logger="gateway.run"):
+        runner._stop_liveness_thread(timeout=0.01)
+
+    assert joined == [0.01]
+    assert runner._liveness_thread is thread
+    assert "liveness thread did not stop" in caplog.text
+
+
 def test_liveness_snapshot_does_not_advance_forward_progress_without_activity(monkeypatch):
     runner = _runner_for_liveness()
     agent = SimpleNamespace(

@@ -605,7 +605,7 @@ def _check_webui_graphify_authority(
         return []
 
     webui = units.get("webui")
-    if webui is None or not webui.exists:
+    if webui is None or (not webui.exists and not webui.dropins):
         return []
 
     mismatches = []
@@ -846,9 +846,9 @@ def _path_is_within(value: str, expected_path: Path) -> bool:
     if not value:
         return False
     try:
-        candidate = Path(os.path.abspath(os.path.expanduser(value)))
-        expected = Path(os.path.abspath(os.path.expanduser(str(expected_path))))
-    except OSError:
+        candidate = Path(os.path.expanduser(value)).resolve(strict=False)
+        expected = Path(os.path.expanduser(str(expected_path))).resolve(strict=False)
+    except (OSError, RuntimeError):
         return False
     return candidate == expected or expected in candidate.parents
 
