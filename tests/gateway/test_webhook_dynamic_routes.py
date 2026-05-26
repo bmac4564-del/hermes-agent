@@ -72,6 +72,31 @@ class TestDynamicRouteLoading:
         assert "v2" in adapter._dynamic_routes
         assert "v1" not in adapter._dynamic_routes
 
+    def test_reloads_when_content_changes_but_mtime_is_unchanged(self, tmp_path):
+        path = tmp_path / _DYNAMIC_ROUTES_FILENAME
+        v1 = json.dumps({"v1": {"secret": "s"}})
+        v2 = json.dumps({"v2": {"secret": "s"}})
+        assert len(v1) == len(v2)
+
+        path.write_text(v1, encoding="utf-8")
+        adapter = _make_adapter()
+        adapter._reload_dynamic_routes()
+        assert adapter._dynamic_routes == {"v1": {"secret": "s"}}
+
+        first_stat = path.stat()
+
+        # Simulate a coarse filesystem/timestamp collision: the content
+        # changes, but the observable mtime remains unchanged.
+        path.write_text(v2, encoding="utf-8")
+        os.utime(path, ns=(first_stat.st_atime_ns, first_stat.st_mtime_ns))
+        assert path.stat().st_mtime_ns == first_stat.st_mtime_ns
+
+        adapter._reload_dynamic_routes()
+
+        assert adapter._dynamic_routes == {"v2": {"secret": "s"}}
+        assert "v1" not in adapter._routes
+        assert "v2" in adapter._routes
+
     def test_file_removal_clears(self, tmp_path):
         path = tmp_path / _DYNAMIC_ROUTES_FILENAME
         path.write_text(json.dumps({"temp": {"secret": "s"}}))

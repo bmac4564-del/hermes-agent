@@ -108,6 +108,7 @@ class WebhookAdapter(BasePlatformAdapter):
         self._static_routes: Dict[str, dict] = config.extra.get("routes", {})
         self._dynamic_routes: Dict[str, dict] = {}
         self._dynamic_routes_mtime: float = 0.0
+        self._dynamic_routes_digest: Optional[str] = None
         self._routes: Dict[str, dict] = dict(self._static_routes)
         self._runner = None
 
@@ -298,16 +299,19 @@ class WebhookAdapter(BasePlatformAdapter):
         hermes_home = get_hermes_home()
         subs_path = hermes_home / _DYNAMIC_ROUTES_FILENAME
         if not subs_path.exists():
-            if self._dynamic_routes:
+            if self._dynamic_routes or self._dynamic_routes_digest is not None:
                 self._dynamic_routes = {}
                 self._routes = dict(self._static_routes)
+                self._dynamic_routes_mtime = 0.0
+                self._dynamic_routes_digest = None
                 logger.debug("[webhook] Dynamic subscriptions file removed, cleared dynamic routes")
             return
         try:
-            mtime = subs_path.stat().st_mtime
-            if mtime <= self._dynamic_routes_mtime:
-                return  # No change
-            data = json.loads(subs_path.read_text(encoding="utf-8"))
+            raw = subs_path.read_bytes()
+            digest = hashlib.sha256(raw).hexdigest()
+            if digest == self._dynamic_routes_digest:
+                return  # No content change
+            data = json.loads(raw.decode("utf-8"))
             if not isinstance(data, dict):
                 return
             # Merge: static routes take precedence over dynamic ones.
@@ -342,7 +346,8 @@ class WebhookAdapter(BasePlatformAdapter):
                 new_dynamic[k] = v
             self._dynamic_routes = new_dynamic
             self._routes = {**self._dynamic_routes, **self._static_routes}
-            self._dynamic_routes_mtime = mtime
+            self._dynamic_routes_mtime = subs_path.stat().st_mtime
+            self._dynamic_routes_digest = digest
             logger.info(
                 "[webhook] Reloaded %d dynamic route(s): %s",
                 len(self._dynamic_routes),
