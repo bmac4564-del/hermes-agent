@@ -5,7 +5,9 @@ from argparse import Namespace
 import pytest
 
 from cron.jobs import create_job, get_job, list_jobs
+from hermes_cli import cron as cron_cli
 from hermes_cli.cron import cron_command
+from hermes_cli.gateway import GatewayRuntimeSnapshot
 
 
 @pytest.fixture()
@@ -17,6 +19,50 @@ def tmp_cron_dir(tmp_path, monkeypatch):
 
 
 class TestCronCommandLifecycle:
+    def test_list_uses_runtime_snapshot_when_process_scan_misses(self, tmp_cron_dir, monkeypatch, capsys):
+        create_job(prompt="Run stale-surface audit", schedule="every 1h")
+
+        monkeypatch.setattr("hermes_cli.gateway.find_gateway_pids", lambda: [])
+        monkeypatch.setattr(
+            "hermes_cli.gateway.get_gateway_runtime_snapshot",
+            lambda system=False: GatewayRuntimeSnapshot(
+                manager="systemd (user, inaccessible)",
+                service_installed=True,
+                gateway_pids=(70604,),
+                runtime_state_running=True,
+                runtime_state_fresh=True,
+                authority="fresh gateway_state.json",
+            ),
+        )
+
+        cron_cli.cron_list()
+
+        out = capsys.readouterr().out
+        assert "Gateway is not running" not in out
+
+    def test_status_uses_runtime_snapshot_when_process_scan_misses(self, tmp_cron_dir, monkeypatch, capsys):
+        create_job(prompt="Run stale-surface audit", schedule="every 1h")
+
+        monkeypatch.setattr("hermes_cli.gateway.find_gateway_pids", lambda: [])
+        monkeypatch.setattr(
+            "hermes_cli.gateway.get_gateway_runtime_snapshot",
+            lambda system=False: GatewayRuntimeSnapshot(
+                manager="systemd (user, inaccessible)",
+                service_installed=True,
+                gateway_pids=(70604,),
+                runtime_state_running=True,
+                runtime_state_fresh=True,
+                authority="fresh gateway_state.json",
+            ),
+        )
+
+        cron_cli.cron_status()
+
+        out = capsys.readouterr().out
+        assert "Gateway is running" in out
+        assert "PID: 70604" in out
+        assert "Gateway is not running" not in out
+
     def test_pause_resume_run(self, tmp_cron_dir, capsys):
         job = create_job(prompt="Check server status", schedule="every 1h")
 

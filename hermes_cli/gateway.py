@@ -13,10 +13,13 @@ import subprocess
 import sys
 import textwrap
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 
+from gateway import status as gateway_status
+from gateway import watchdog_check
 from gateway.status import terminate_pid
 from gateway.restart import (
     DEFAULT_GATEWAY_RESTART_DRAIN_TIMEOUT,
@@ -53,14 +56,27 @@ class GatewayRuntimeSnapshot:
     service_running: bool = False
     gateway_pids: tuple[int, ...] = ()
     service_scope: str | None = None
+    runtime_state_running: bool = False
+    runtime_state_fresh: bool = False
+    status_unknown: bool = False
+    authority: str | None = None
+    status_detail: str | None = None
 
     @property
     def running(self) -> bool:
-        return self.service_running or bool(self.gateway_pids)
+        return self.service_running or self.runtime_state_running or bool(self.gateway_pids)
 
     @property
     def has_process_service_mismatch(self) -> bool:
-        return self.service_installed and self.running and not self.service_running
+        if self.status_unknown or self.runtime_state_running:
+            return False
+        if self.authority and "systemd inaccessible" in self.authority:
+            return False
+        return self.service_installed and bool(self.gateway_pids) and not self.service_running
+
+
+_RUNTIME_STATUS_FRESH_SECONDS = 180
+_RUNTIME_STATUS_RUNNING_STATES = {"starting", "running", "degraded", "draining"}
 
 
 @dataclass(frozen=True)
@@ -969,6 +985,106 @@ def _probe_launchd_service_running() -> bool:
     return result.returncode == 0
 
 
+def _systemd_unit_installed_for_scope(system: bool = False) -> bool:
+    try:
+        return get_systemd_unit_path(system=system).exists()
+    except Exception:
+        return False
+
+
+def _systemd_unit_installed_any_scope() -> bool:
+    return _systemd_unit_installed_for_scope(system=False) or _systemd_unit_installed_for_scope(system=True)
+
+
+def _parse_runtime_status_timestamp(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _runtime_status_age_seconds(payload: dict) -> float | None:
+    for key in ("process_heartbeat_at", "updated_at"):
+        parsed = _parse_runtime_status_timestamp(payload.get(key))
+        if parsed is None:
+            continue
+        return max(0.0, (datetime.now(timezone.utc) - parsed).total_seconds())
+    return None
+
+
+def _runtime_status_pid_tuple(payload: dict) -> tuple[int, ...]:
+    try:
+        pid = int(payload.get("pid") or 0)
+    except (TypeError, ValueError):
+        return ()
+    return (pid,) if pid > 0 else ()
+
+
+def _runtime_state_snapshot_for_inaccessible_systemd(
+    *,
+    system: bool = False,
+    gateway_pids: tuple[int, ...] = (),
+) -> GatewayRuntimeSnapshot | None:
+    selected_system = _select_systemd_scope(system)
+    if not _systemd_unit_installed_for_scope(system=selected_system):
+        return None
+
+    scope_label = _service_scope_label(selected_system)
+    manager = f"systemd ({scope_label}, inaccessible)"
+    detail = "systemd is not accessible from this process"
+
+    payload = gateway_status.read_runtime_status() or {}
+    if isinstance(payload, dict) and payload:
+        state = str(payload.get("gateway_state") or "").strip().lower()
+        payload_pid = _runtime_status_pid_tuple(payload)
+        visible_pid_mismatch = bool(
+            gateway_pids and payload_pid and payload_pid[0] not in set(gateway_pids)
+        )
+        live_pid = payload_pid[0] if payload_pid and payload_pid[0] in set(gateway_pids) else None
+        watchdog_code, _ = watchdog_check.validate_runtime_payload_for_watchdog(
+            payload,
+            live_pid=live_pid,
+        )
+        if (
+            watchdog_code == 0
+            and not visible_pid_mismatch
+            and state in _RUNTIME_STATUS_RUNNING_STATES
+        ):
+            pids = tuple(dict.fromkeys([*gateway_pids, *_runtime_status_pid_tuple(payload)]))
+            return GatewayRuntimeSnapshot(
+                manager=manager,
+                service_installed=True,
+                service_running=False,
+                gateway_pids=pids,
+                service_scope=scope_label,
+                runtime_state_running=True,
+                runtime_state_fresh=True,
+                authority="fresh gateway_state.json",
+                status_detail=detail,
+            )
+
+    return GatewayRuntimeSnapshot(
+        manager=manager,
+        service_installed=True,
+        service_running=False,
+        gateway_pids=gateway_pids,
+        service_scope=scope_label,
+        status_unknown=True,
+        authority="systemd inaccessible",
+        status_detail=f"{detail}; fresh runtime state is unavailable",
+    )
+
+
 def get_gateway_runtime_snapshot(system: bool = False) -> GatewayRuntimeSnapshot:
     """Return a unified view of gateway liveness for the current profile."""
     gateway_pids = tuple(find_gateway_pids())
@@ -1009,6 +1125,14 @@ def get_gateway_runtime_snapshot(system: bool = False) -> GatewayRuntimeSnapshot
             service_scope=scope_label,
         )
 
+    if is_linux() and _systemd_unit_installed_any_scope():
+        inaccessible_snapshot = _runtime_state_snapshot_for_inaccessible_systemd(
+            system=system,
+            gateway_pids=gateway_pids,
+        )
+        if inaccessible_snapshot is not None:
+            return inaccessible_snapshot
+
     if is_macos():
         return GatewayRuntimeSnapshot(
             manager="launchd",
@@ -1039,6 +1163,33 @@ def _print_gateway_process_mismatch(snapshot: GatewayRuntimeSnapshot) -> None:
     print(f"  PID(s): {_format_gateway_pids(snapshot.gateway_pids, limit=None)}")
     print("  This is usually a manual foreground/tmux/nohup run, so `hermes gateway`")
     print("  can refuse to start another copy until this process stops.")
+
+
+def _print_systemd_inaccessible_status(snapshot: GatewayRuntimeSnapshot) -> None:
+    if snapshot.running:
+        print("✓ Gateway is running")
+    else:
+        print("⚠ Gateway status is unknown")
+    print(f"  Manager: {snapshot.manager}")
+    if snapshot.gateway_pids:
+        print(f"  PID(s): {_format_gateway_pids(snapshot.gateway_pids, limit=None)}")
+    if snapshot.authority:
+        print(f"  Authority: {snapshot.authority}")
+    if snapshot.status_detail:
+        print(f"  Note: {snapshot.status_detail}")
+
+    runtime_lines = _runtime_health_lines()
+    if runtime_lines:
+        print()
+        print("Recent gateway health:")
+        for line in runtime_lines:
+            print(f"  {line}")
+
+    if not snapshot.running:
+        print()
+        print("A gateway service unit is installed, but this process cannot query systemd.")
+        print("Check from an unrestricted shell:")
+        print("  systemctl --user status hermes-gateway.service")
 
 
 def _print_other_profiles_gateway_status() -> None:
@@ -5547,9 +5698,13 @@ def _gateway_command_inner(args):
         if is_windows():
             from hermes_cli import gateway_windows
             _windows_service_installed = gateway_windows.is_installed()
-        if supports_systemd_services() and (get_systemd_unit_path(system=False).exists() or get_systemd_unit_path(system=True).exists()):
-            systemd_status(deep, system=system, full=full)
-            _print_gateway_process_mismatch(snapshot)
+        _systemd_unit_installed = is_linux() and not is_termux() and _systemd_unit_installed_any_scope()
+        if _systemd_unit_installed:
+            if supports_systemd_services():
+                systemd_status(deep, system=system, full=full)
+                _print_gateway_process_mismatch(snapshot)
+            else:
+                _print_systemd_inaccessible_status(snapshot)
         elif is_macos() and get_launchd_plist_path().exists():
             launchd_status(deep)
             _print_gateway_process_mismatch(snapshot)
