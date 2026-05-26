@@ -4167,7 +4167,9 @@ def scan_workspace_authority(
 ) -> list[WorkspaceAuthorityFinding]:
     """Classify persisted workspace paths against private-lane authority."""
     rows = conn.execute(
-        "SELECT * FROM tasks WHERE workspace_path IS NOT NULL "
+        "SELECT * FROM tasks "
+        "WHERE workspace_path IS NOT NULL "
+        "   OR lower(coalesce(workspace_kind, 'scratch')) = 'worktree' "
         "ORDER BY created_at ASC, id ASC"
     ).fetchall()
     findings: list[WorkspaceAuthorityFinding] = []
@@ -4286,8 +4288,10 @@ def resolve_workspace(task: Task, *, board: Optional[str] = None) -> Path:
         return p
     if kind == "worktree":
         if not task.workspace_path:
-            # Default: .worktrees/<id>/ under CWD.  Worker skill creates it.
-            return Path.cwd() / ".worktrees" / task.id
+            raise ValueError(
+                f"task {task.id} has workspace_kind=worktree but no explicit "
+                "workspace_path; dispatch requires an approved worktree path"
+            )
         p = Path(task.workspace_path).expanduser()
         if not p.is_absolute():
             raise ValueError(

@@ -247,6 +247,7 @@ GATEWAY_SELF_RESTART_PATTERNS_COMPILED = [
 ]
 
 _SHELL_WRAPPER_BASENAMES = {"bash", "dash", "ksh", "sh", "zsh"}
+_COMMAND_PREFIX_WRAPPER_BASENAMES = {"exec", "nohup", "setsid", "time"}
 _GATEWAY_RESTART_ACTIONS = {"restart", "stop"}
 
 
@@ -326,6 +327,25 @@ def _is_gateway_self_restart_command(normalized_command: str) -> bool:
             while idx < len(tokens) and (
                 "=" in tokens[idx] or tokens[idx].startswith("-")
             ):
+                idx += 1
+            return _matches_tokens(tokens[idx:])
+
+        if cmd in _COMMAND_PREFIX_WRAPPER_BASENAMES:
+            idx = 1
+            options_with_values = {
+                "exec": {"-a"},
+                "nohup": set(),
+                "setsid": set(),
+                "time": {"-f", "--format", "-o", "--output"},
+            }[cmd]
+            while idx < len(tokens) and tokens[idx].startswith("-"):
+                token = tokens[idx]
+                if token == "--":
+                    idx += 1
+                    break
+                if token in options_with_values:
+                    idx += 2
+                    continue
                 idx += 1
             return _matches_tokens(tokens[idx:])
 

@@ -39,6 +39,16 @@ def test_get_secret_source_returns_label_for_tracked_var():
     assert env_loader.get_secret_source("ANTHROPIC_API_KEY") == "bitwarden"
 
 
+def test_reset_secret_source_cache_clears_stale_source_provenance():
+    env_loader._SECRET_SOURCES["ANTHROPIC_API_KEY"] = "bitwarden"
+    env_loader._APPLIED_HOMES.add("/tmp/hermes-home")
+
+    env_loader.reset_secret_source_cache()
+
+    assert env_loader.get_secret_source("ANTHROPIC_API_KEY") is None
+    assert env_loader._APPLIED_HOMES == set()
+
+
 def test_format_secret_source_suffix_empty_for_untracked():
     # Credentials from .env or the shell shouldn't add noise — the
     # implicit case stays unlabeled.

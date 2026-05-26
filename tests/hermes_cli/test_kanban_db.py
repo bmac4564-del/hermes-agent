@@ -1521,6 +1521,38 @@ def test_dispatch_blocks_empty_worktree_path_before_spawn(
     assert "workspace_authority" in result.workspace_authority_blocked[0][1]
 
 
+def test_resolve_worktree_requires_explicit_workspace_path(kanban_home):
+    with kb.connect() as conn:
+        task_id = kb.create_task(
+            conn,
+            title="missing worktree path",
+            assignee="alice",
+            workspace_kind="worktree",
+        )
+        task = kb.get_task(conn, task_id)
+
+    assert task is not None
+    assert task.workspace_path is None
+    with pytest.raises(ValueError, match="explicit workspace_path"):
+        kb.resolve_workspace(task)
+
+
+def test_scan_workspace_authority_flags_unset_worktree_path(kanban_home):
+    with kb.connect() as conn:
+        task_id = kb.create_task(
+            conn,
+            title="missing worktree path",
+            assignee="alice",
+            workspace_kind="worktree",
+        )
+
+        findings = kb.scan_workspace_authority(conn)
+
+    assert [(f.task_id, f.classification, f.blocks_dispatch) for f in findings] == [
+        (task_id, "active_empty_worktree_path", True)
+    ]
+
+
 def test_dispatch_does_not_block_production_task_only_because_title_is_proja(
     kanban_home, all_assignees_spawnable, monkeypatch
 ):

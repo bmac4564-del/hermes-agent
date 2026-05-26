@@ -8,6 +8,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch as mock_patch
 
+import pytest
+
 import tools.approval as approval_module
 from tools.approval import (
     _get_approval_mode,
@@ -719,6 +721,33 @@ class TestGatewayProtection:
 
             assert hardline is True, command
             assert "gateway self-restart" in desc
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "exec systemctl --user restart hermes-gateway.service",
+            "nohup systemctl --user restart hermes-gateway.service",
+            "setsid systemctl --user restart hermes-gateway.service",
+            "setsid -w systemctl --user restart hermes-gateway.service",
+            "time systemctl --user restart hermes-gateway.service",
+            "time -p systemctl --user restart hermes-gateway.service",
+        ],
+    )
+    def test_command_prefix_wrapped_systemctl_restart_hardline_inside_gateway_cgroup(
+        self, monkeypatch, command
+    ):
+        """Command-prefix wrappers must not hide a gateway self-restart."""
+        monkeypatch.setattr(
+            approval_module,
+            "_is_running_inside_gateway_service_cgroup",
+            lambda: True,
+            raising=False,
+        )
+
+        hardline, desc = approval_module.detect_hardline_command(command)
+
+        assert hardline is True, command
+        assert "gateway self-restart" in desc
 
     def test_gateway_self_restart_hardline_ignores_prose_and_search_mentions(
         self, monkeypatch

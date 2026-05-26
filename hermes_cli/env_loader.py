@@ -63,6 +63,7 @@ def reset_secret_source_cache() -> None:
     that want to refresh after a config change.
     """
     _APPLIED_HOMES.clear()
+    _SECRET_SOURCES.clear()
 
 
 def format_secret_source_suffix(env_var: str) -> str:
