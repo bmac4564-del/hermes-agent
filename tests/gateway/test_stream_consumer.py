@@ -9,6 +9,14 @@ import pytest
 from gateway.stream_consumer import GatewayStreamConsumer, StreamConsumerConfig
 
 
+async def _wait_until(predicate, *, timeout: float = 1.0, interval: float = 0.01) -> None:
+    deadline = asyncio.get_running_loop().time() + timeout
+    while not predicate():
+        if asyncio.get_running_loop().time() >= deadline:
+            raise AssertionError("condition did not become true before timeout")
+        await asyncio.sleep(interval)
+
+
 # ── _clean_for_display unit tests ────────────────────────────────────────
 
 
@@ -524,9 +532,9 @@ class TestSegmentBreakOnToolBoundary:
 
         consumer.on_delta("Hello")
         task = asyncio.create_task(consumer.run())
-        await asyncio.sleep(0.08)
+        await _wait_until(lambda: adapter.send.call_count == 1)
         consumer.on_delta(" world")
-        await asyncio.sleep(0.08)
+        await _wait_until(lambda: adapter.edit_message.call_count >= 1)
         consumer.finish()
         await task
 
@@ -556,9 +564,9 @@ class TestSegmentBreakOnToolBoundary:
 
         consumer.on_delta("Hello")
         task = asyncio.create_task(consumer.run())
-        await asyncio.sleep(0.08)
+        await _wait_until(lambda: adapter.send.call_count == 1)
         consumer.on_delta(" world")
-        await asyncio.sleep(0.08)
+        await _wait_until(lambda: adapter.edit_message.call_count >= 1)
         consumer.on_delta(None)
         consumer.on_delta("Next segment")
         consumer.finish()

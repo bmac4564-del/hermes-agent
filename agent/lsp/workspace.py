@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
+import tempfile
 from pathlib import Path
 from typing import Iterable, Optional, Tuple
 
@@ -66,10 +67,17 @@ def find_git_worktree(start: str) -> Optional[str]:
         return root
 
     cur = start_path
+    temp_root = Path(normalize_path(tempfile.gettempdir()))
     # Defensive cap: the deepest reasonable monorepo is well under 64
     # levels.  Caps the walk so a pathological cwd or a symlink cycle
     # we somehow traverse can't keep us looping.
     for _ in range(64):
+        # Parallel test/sandbox tools can transiently create a `.git` marker
+        # directly at the system temp root.  Do not let that classify every
+        # unrelated temp file as part of a repository.  Real repos nested below
+        # the temp root are still discovered before this point in the upward walk.
+        if cur == temp_root:
+            break
         git_marker = cur / ".git"
         try:
             if git_marker.exists():
