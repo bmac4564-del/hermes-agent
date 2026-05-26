@@ -287,7 +287,37 @@ def _is_gateway_self_restart_command(normalized_command: str) -> bool:
         cmd = _basename(tokens[0])
         if cmd in {"sudo", "doas"}:
             idx = 1
+            options_with_values = {
+                "-u",
+                "-g",
+                "-h",
+                "-p",
+                "-C",
+                "-D",
+                "--user",
+                "--group",
+                "--host",
+                "--prompt",
+                "--close-from",
+                "--chdir",
+                "--login-class",
+                "--role",
+                "--type",
+            }
             while idx < len(tokens) and tokens[idx].startswith("-"):
+                token = tokens[idx]
+                if token == "--":
+                    idx += 1
+                    break
+                if token in options_with_values:
+                    idx += 2
+                    continue
+                if any(
+                    token.startswith(short) and token != short
+                    for short in ("-u", "-g", "-h", "-p", "-C", "-D")
+                ):
+                    idx += 1
+                    continue
                 idx += 1
             return _matches_tokens(tokens[idx:])
 

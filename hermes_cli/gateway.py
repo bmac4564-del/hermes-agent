@@ -996,6 +996,29 @@ def _systemd_unit_installed_any_scope() -> bool:
     return _systemd_unit_installed_for_scope(system=False) or _systemd_unit_installed_for_scope(system=True)
 
 
+def _systemd_scope_accessible(system: bool = False) -> bool:
+    selected_system = _select_systemd_scope(system)
+    if not _systemd_unit_installed_for_scope(system=selected_system):
+        return False
+    try:
+        result = _run_systemctl(
+            [
+                "show",
+                get_service_name(),
+                "--no-pager",
+                "--property",
+                "LoadState",
+            ],
+            system=selected_system,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (RuntimeError, subprocess.TimeoutExpired, OSError):
+        return False
+    return result.returncode == 0
+
+
 def _parse_runtime_status_timestamp(value: object) -> datetime | None:
     if not isinstance(value, str):
         return None
@@ -1043,7 +1066,20 @@ def _runtime_state_snapshot_for_inaccessible_systemd(
     manager = f"systemd ({scope_label}, inaccessible)"
     detail = "systemd is not accessible from this process"
 
-    payload = gateway_status.read_runtime_status() or {}
+    unit_env = _read_systemd_unit_environment(system=selected_system)
+    unit_home = unit_env.get("HERMES_HOME", "").strip()
+    if unit_home:
+        original_home = os.environ.get("HERMES_HOME")
+        os.environ["HERMES_HOME"] = unit_home
+        try:
+            payload = gateway_status.read_runtime_status() or {}
+        finally:
+            if original_home is None:
+                os.environ.pop("HERMES_HOME", None)
+            else:
+                os.environ["HERMES_HOME"] = original_home
+    else:
+        payload = gateway_status.read_runtime_status() or {}
     if isinstance(payload, dict) and payload:
         state = str(payload.get("gateway_state") or "").strip().lower()
         payload_pid = _runtime_status_pid_tuple(payload)
@@ -1115,6 +1151,14 @@ def get_gateway_runtime_snapshot(system: bool = False) -> GatewayRuntimeSnapshot
         )
 
     if supports_systemd_services():
+        selected_system = _select_systemd_scope(system)
+        if not _systemd_scope_accessible(system=selected_system):
+            inaccessible_snapshot = _runtime_state_snapshot_for_inaccessible_systemd(
+                system=selected_system,
+                gateway_pids=gateway_pids,
+            )
+            if inaccessible_snapshot is not None:
+                return inaccessible_snapshot
         selected_system, service_running = _probe_systemd_service_running(system=system)
         scope_label = _service_scope_label(selected_system)
         return GatewayRuntimeSnapshot(

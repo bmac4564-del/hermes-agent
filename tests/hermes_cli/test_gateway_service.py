@@ -1,5 +1,6 @@
 """Tests for gateway service management helpers."""
 
+import json
 import os
 import subprocess
 from datetime import datetime, timedelta, timezone
@@ -788,6 +789,74 @@ class TestGatewayServiceDetection:
         assert snapshot.runtime_state_running is True
         assert snapshot.authority == "fresh gateway_state.json"
         assert snapshot.has_process_service_mismatch is False
+
+    def test_runtime_snapshot_reads_status_from_unit_hermes_home_when_inaccessible(self, tmp_path, monkeypatch):
+        user_unit = SimpleNamespace(exists=lambda: True)
+        system_unit = SimpleNamespace(exists=lambda: False)
+        caller_home = tmp_path / "caller-home"
+        unit_home = tmp_path / "unit-home"
+        caller_home.mkdir()
+        unit_home.mkdir()
+        (caller_home / "gateway_state.json").write_text(
+            json.dumps({"gateway_state": "stopped", "pid": None}),
+            encoding="utf-8",
+        )
+        (unit_home / "gateway_state.json").write_text(
+            json.dumps(_watchdog_runtime_payload()),
+            encoding="utf-8",
+        )
+
+        monkeypatch.setenv("HERMES_HOME", str(caller_home))
+        monkeypatch.setattr(gateway_cli, "supports_systemd_services", lambda: False)
+        monkeypatch.setattr(gateway_cli, "is_termux", lambda: False)
+        monkeypatch.setattr(gateway_cli, "is_macos", lambda: False)
+        monkeypatch.setattr(gateway_cli, "is_linux", lambda: True)
+        monkeypatch.setattr(gateway_cli, "find_gateway_pids", lambda: [1234])
+        monkeypatch.setattr(gateway_cli.watchdog_check.time, "monotonic", lambda: 110.0)
+        monkeypatch.setattr(
+            gateway_cli,
+            "get_systemd_unit_path",
+            lambda system=False: system_unit if system else user_unit,
+        )
+        monkeypatch.setattr(
+            gateway_cli,
+            "_read_systemd_unit_environment",
+            lambda system=False: {"HERMES_HOME": str(unit_home)},
+        )
+
+        snapshot = gateway_cli.get_gateway_runtime_snapshot()
+
+        assert snapshot.running is True
+        assert snapshot.runtime_state_running is True
+        assert snapshot.authority == "fresh gateway_state.json"
+
+    def test_runtime_snapshot_uses_runtime_state_when_systemctl_scope_is_inaccessible(self, monkeypatch):
+        user_unit = SimpleNamespace(exists=lambda: True)
+        system_unit = SimpleNamespace(exists=lambda: False)
+
+        monkeypatch.setattr(gateway_cli, "supports_systemd_services", lambda: True)
+        monkeypatch.setattr(gateway_cli, "is_termux", lambda: False)
+        monkeypatch.setattr(gateway_cli, "is_macos", lambda: False)
+        monkeypatch.setattr(gateway_cli, "is_linux", lambda: True)
+        monkeypatch.setattr(gateway_cli, "find_gateway_pids", lambda: [1234])
+        monkeypatch.setattr(gateway_cli.watchdog_check.time, "monotonic", lambda: 110.0)
+        monkeypatch.setattr(
+            gateway_cli,
+            "get_systemd_unit_path",
+            lambda system=False: system_unit if system else user_unit,
+        )
+        monkeypatch.setattr(
+            gateway_cli,
+            "_run_systemctl",
+            lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("systemd unavailable")),
+        )
+        monkeypatch.setattr(status, "read_runtime_status", lambda: _watchdog_runtime_payload())
+
+        snapshot = gateway_cli.get_gateway_runtime_snapshot()
+
+        assert snapshot.running is True
+        assert snapshot.service_running is False
+        assert snapshot.authority == "fresh gateway_state.json"
 
     def test_runtime_snapshot_rejects_watchdog_stale_state_when_systemd_is_inaccessible(self, monkeypatch):
         user_unit = SimpleNamespace(exists=lambda: True)

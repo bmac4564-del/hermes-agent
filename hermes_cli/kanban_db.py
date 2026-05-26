@@ -4029,14 +4029,6 @@ def _canonical_workspace_path(path: Path | str) -> Path:
     return Path(path).expanduser().resolve(strict=False)
 
 
-def _path_is_under(path: Path, root: Path) -> bool:
-    try:
-        path.relative_to(root)
-        return True
-    except ValueError:
-        return False
-
-
 def _path_list_env(var_name: str) -> list[Path]:
     raw = os.environ.get(var_name, "").strip()
     if not raw:
@@ -4102,14 +4094,28 @@ def _workspace_authority_finding(
     *,
     board: Optional[str] = None,
 ) -> Optional[WorkspaceAuthorityFinding]:
+    workspace_kind = (task.workspace_kind or "scratch").strip().casefold()
     if not task.workspace_path:
+        if workspace_kind == "worktree":
+            return WorkspaceAuthorityFinding(
+                task_id=task.id,
+                status=task.status,
+                workspace_path="",
+                severity="P0",
+                classification="active_empty_worktree_path",
+                reason=(
+                    "workspace_authority: workspace_kind=worktree requires "
+                    "an explicit approved workspace_path before dispatch"
+                ),
+                blocks_dispatch=True,
+            )
         return None
 
     path = _canonical_workspace_path(task.workspace_path)
     historical = task.status in _HISTORICAL_WORKSPACE_STATUSES
 
     for root in forbidden_workspace_roots():
-        if _path_is_under(path, root):
+        if _path_is_under(root, path):
             classification = (
                 "historical_legacy_residue"
                 if historical
@@ -4130,7 +4136,7 @@ def _workspace_authority_finding(
             )
 
     approved = approved_workspace_roots(board=board)
-    if any(_path_is_under(path, root) for root in approved):
+    if any(_path_is_under(root, path) for root in approved):
         return None
 
     classification = (
@@ -4173,6 +4179,8 @@ def scan_workspace_authority(
 
 
 def _bodyless_synthetic_invalid_spec_reason(task: Task) -> Optional[str]:
+    if not os.environ.get("PYTEST_CURRENT_TEST"):
+        return None
     title = (task.title or "").strip().casefold()
     body = (task.body or "").strip()
     if title in _BODYLESS_SYNTHETIC_TITLES and not body:

@@ -173,3 +173,43 @@ def test_apply_external_secret_sources_dedupes_within_process(tmp_path, monkeypa
     env_loader.reset_secret_source_cache()
     env_loader._apply_external_secret_sources(tmp_path)
     assert call_count["n"] == 2
+
+
+def test_apply_external_secret_sources_retries_after_transient_bitwarden_error(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "secrets:\n"
+        "  bitwarden:\n"
+        "    enabled: true\n"
+        "    project_id: test-project\n"
+        "    access_token_env: BWS_ACCESS_TOKEN\n",
+        encoding="utf-8",
+    )
+
+    from agent.secret_sources.bitwarden import FetchResult
+
+    results = iter(
+        [
+            FetchResult(error="temporary bws outage"),
+            FetchResult(
+                secrets={"ANTHROPIC_API_KEY": "sk-ant-test"},
+                applied=["ANTHROPIC_API_KEY"],
+            ),
+        ]
+    )
+    calls = {"n": 0}
+
+    def _fake_apply(**_kwargs):
+        calls["n"] += 1
+        return next(results)
+
+    import agent.secret_sources.bitwarden as bw_module
+
+    monkeypatch.setattr(bw_module, "apply_bitwarden_secrets", _fake_apply)
+
+    env_loader._apply_external_secret_sources(tmp_path)
+    env_loader._apply_external_secret_sources(tmp_path)
+
+    assert calls["n"] == 2
+    assert env_loader.get_secret_source("ANTHROPIC_API_KEY") == "bitwarden"

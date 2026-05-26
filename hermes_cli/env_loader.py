@@ -267,7 +267,6 @@ def _apply_external_secret_sources(home_path: Path) -> None:
     home_key = str(Path(home_path).resolve())
     if home_key in _APPLIED_HOMES:
         return
-    _APPLIED_HOMES.add(home_key)
 
     try:
         cfg = _load_secrets_config(home_path)
@@ -320,6 +319,8 @@ def _apply_external_secret_sources(home_path: Path) -> None:
             f"  Bitwarden Secrets Manager: {warn}",
             file=sys.stderr,
         )
+    if not result.error:
+        _APPLIED_HOMES.add(home_key)
 
 
 def _load_secrets_config(home_path: Path) -> dict:

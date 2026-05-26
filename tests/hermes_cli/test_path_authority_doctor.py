@@ -27,6 +27,50 @@ def test_parse_paths_env_redacts_secret_values(tmp_path):
     assert redacted_value not in json.dumps(parsed.to_report())
 
 
+def test_parse_paths_env_unreadable_file_fails_closed_without_crashing(tmp_path, monkeypatch):
+    env_file = tmp_path / "paths.env"
+    env_file.write_text("HERMES_KANBAN_AGENT_DIR=/srv/hermes\n", encoding="utf-8")
+    original_read_text = Path.read_text
+
+    def _raise_for_env_file(self, *args, **kwargs):
+        if self == env_file:
+            raise OSError("permission denied")
+        return original_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", _raise_for_env_file)
+
+    parsed = pad.parse_paths_env(env_file)
+
+    assert parsed.exists is True
+    assert parsed.values == {}
+    assert parsed.redacted == {}
+
+
+def test_read_effective_unit_skips_unreadable_dropin_without_crashing(tmp_path, monkeypatch):
+    unit_dir = tmp_path / "systemd" / "user"
+    dropin_dir = unit_dir / "hermes-gateway.service.d"
+    dropin_dir.mkdir(parents=True)
+    unit_path = unit_dir / "hermes-gateway.service"
+    dropin_path = dropin_dir / "10-unreadable.conf"
+    unit_path.write_text(
+        "[Service]\nExecStart=/srv/hermes/.venv/bin/hermes gateway run\n",
+        encoding="utf-8",
+    )
+    dropin_path.write_text("[Service]\nWorkingDirectory=/srv/hermes\n", encoding="utf-8")
+    original_read_text = Path.read_text
+
+    def _raise_for_dropin(self, *args, **kwargs):
+        if self == dropin_path:
+            raise OSError("permission denied")
+        return original_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", _raise_for_dropin)
+
+    effective = pad.read_effective_unit("gateway", "hermes-gateway.service", unit_dir)
+
+    assert effective.effective.exec_start == ["/srv/hermes/.venv/bin/hermes gateway run"]
+
+
 def test_systemd_dropin_execstart_reset_overrides_base(tmp_path):
     target = tmp_path / "agent"
     target.mkdir()

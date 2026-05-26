@@ -694,6 +694,12 @@ def test_schedule_task_parks_time_delay_without_dispatching(kanban_home):
         assert any(e.kind == "scheduled" and e.payload == {"reason": "run next week"} for e in events)
 
 
+def test_path_is_under_helper_has_single_canonical_signature():
+    source = Path(kb.__file__).read_text(encoding="utf-8")
+
+    assert source.count("def _path_is_under(") == 1
+
+
 def test_unblock_scheduled_rechecks_parent_gate(kanban_home):
     with kb.connect() as conn:
         parent = kb.create_task(conn, title="parent")
@@ -1493,6 +1499,49 @@ def test_dispatch_max_spawn_fills_remaining_capacity(
         assert spawns == [ready_a]
         assert kb.get_task(conn, ready_a).status == "running"
         assert kb.get_task(conn, ready_b).status == "ready"
+
+
+def test_dispatch_blocks_empty_worktree_path_before_spawn(
+    kanban_home, all_assignees_spawnable
+):
+    with kb.connect() as conn:
+        task_id = kb.create_task(
+            conn,
+            title="empty worktree path",
+            assignee="alice",
+            workspace_kind="worktree",
+            workspace_path="",
+        )
+
+        result = kb.dispatch_once(conn, dry_run=True)
+
+    assert result.spawned == []
+    assert len(result.workspace_authority_blocked) == 1
+    assert result.workspace_authority_blocked[0][0] == task_id
+    assert "workspace_authority" in result.workspace_authority_blocked[0][1]
+
+
+def test_dispatch_does_not_block_production_task_only_because_title_is_proja(
+    kanban_home, all_assignees_spawnable, monkeypatch
+):
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    spawns = []
+
+    def fake_spawn(task, workspace):
+        spawns.append((task.id, task.title, workspace))
+
+    with kb.connect() as conn:
+        task_id = kb.create_task(conn, title="ProjA", assignee="alice")
+
+        result = kb.dispatch_once(conn, spawn_fn=fake_spawn)
+
+        task = kb.get_task(conn, task_id)
+
+    assert task is not None
+    assert result.invalid_spec_blocked == []
+    assert [item[0] for item in result.spawned] == [task_id]
+    assert [item[0] for item in spawns] == [task_id]
+    assert task.status == "running"
 
 
 def test_dispatch_reclaims_stale_before_spawning(kanban_home):

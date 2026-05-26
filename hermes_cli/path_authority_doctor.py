@@ -195,8 +195,13 @@ def parse_paths_env(path: Path | None = None) -> ParsedPathsEnv:
     if not path.exists():
         return ParsedPathsEnv(path=path, exists=False, values={}, redacted={})
 
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return ParsedPathsEnv(path=path, exists=True, values={}, redacted={})
+
     values: dict[str, str] = {}
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
+    for raw_line in text.splitlines():
         parsed = _parse_env_assignment(raw_line)
         if parsed is None:
             continue
@@ -320,7 +325,11 @@ def read_effective_unit(role: str, unit_name: str, systemd_user_dir: Path) -> Un
     sources = [unit_path] if unit_path.exists() else []
     sources.extend(dropins)
     for source in sources:
-        _apply_unit_source(effective, source.read_text(encoding="utf-8"))
+        try:
+            text = source.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        _apply_unit_source(effective, text)
 
     return UnitReport(
         role=role,

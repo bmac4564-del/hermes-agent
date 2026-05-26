@@ -594,7 +594,10 @@ def write_runtime_status(
     for key, value in _build_runtime_status_record().items():
         payload.setdefault(key, value)
     current_record = _build_pid_record()
-    payload.setdefault("platforms", {})
+    platforms = payload.get("platforms")
+    if not isinstance(platforms, dict):
+        platforms = {}
+    payload["platforms"] = platforms
     payload["kind"] = current_record["kind"]
     payload["gateway_status_schema_version"] = _RUNTIME_STATUS_SCHEMA_VERSION
     payload["pid"] = current_record["pid"]
@@ -661,6 +664,8 @@ def write_runtime_status(
 
     if platform is not _UNSET:
         platform_payload = payload["platforms"].get(platform, {})
+        if not isinstance(platform_payload, dict):
+            platform_payload = {}
         if platform_state is not _UNSET:
             platform_payload["state"] = platform_state
         if error_code is not _UNSET:

@@ -663,6 +663,22 @@ class TestGatewayProtection:
         assert hardline is True
         assert "gateway self-restart" in desc
 
+    def test_sudo_preserves_option_values_before_systemctl_restart_hardline(self, monkeypatch):
+        """sudo options with values must not hide a gateway self-restart."""
+        monkeypatch.setattr(
+            approval_module,
+            "_is_running_inside_gateway_service_cgroup",
+            lambda: True,
+            raising=False,
+        )
+
+        hardline, desc = approval_module.detect_hardline_command(
+            "sudo -u root --preserve-env=PATH systemctl --user restart hermes-gateway.service"
+        )
+
+        assert hardline is True
+        assert "gateway self-restart" in desc
+
     def test_systemctl_restart_not_hardline_outside_gateway_cgroup(self, monkeypatch):
         """Operators outside the gateway still get the normal approval gate."""
         monkeypatch.setattr(

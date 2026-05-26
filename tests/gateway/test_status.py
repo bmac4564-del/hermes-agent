@@ -351,6 +351,21 @@ class TestGatewayRuntimeStatus:
         assert payload["work_active"] is False
         assert payload["run_lifecycle_count"] == 0
 
+    def test_write_runtime_status_replaces_malformed_platforms_payload(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        state_path = tmp_path / "gateway_state.json"
+        state_path.write_text(
+            json.dumps({"gateway_state": "running", "platforms": ["not", "a", "dict"]}),
+            encoding="utf-8",
+        )
+
+        status.write_runtime_status(platform="telegram", platform_state="running")
+
+        payload = status.read_runtime_status()
+        assert payload is not None
+        assert isinstance(payload["platforms"], dict)
+        assert payload["platforms"]["telegram"]["state"] == "running"
+
     def test_write_runtime_status_records_import_authority(self, tmp_path, monkeypatch):
         monkeypatch.setenv("HERMES_HOME", str(tmp_path))
         monkeypatch.setattr(status.sys, "executable", "/rescue/.venv/bin/python")
