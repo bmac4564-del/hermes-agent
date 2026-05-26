@@ -155,6 +155,24 @@ class TestAgentHasActiveSubagents:
 
         assert GatewayRunner._agent_has_active_subagents(StubAgent()) is False
 
+    def test_returns_false_when_children_attribute_raises(self) -> None:
+        class BrokenAgent:
+            @property
+            def _active_children(self):
+                raise RuntimeError("broken child state")
+
+        assert GatewayRunner._agent_has_active_subagents(BrokenAgent()) is False
+
+    def test_returns_false_when_lock_attribute_raises(self) -> None:
+        class BrokenAgent:
+            _active_children = [object()]
+
+            @property
+            def _active_children_lock(self):
+                raise RuntimeError("broken lock state")
+
+        assert GatewayRunner._agent_has_active_subagents(BrokenAgent()) is False
+
     def test_returns_false_for_empty_list(self) -> None:
         assert (
             GatewayRunner._agent_has_active_subagents(_make_parent_no_subagents())

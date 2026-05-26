@@ -293,6 +293,21 @@ class TestInvisibleUnicode:
         findings = scan_for_threats("rtl override\u2066here", scope="all")
         assert any(f.startswith("invisible_unicode_U+2066") for f in findings)
 
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "family update 👨‍👩‍👧",
+            "rainbow flag 🏳️‍🌈",
+            "developer activity 🧑‍💻",
+        ],
+    )
+    def test_legitimate_emoji_zwj_sequences_allowed(self, text):
+        assert scan_for_threats(text, scope="all") == []
+
+    def test_non_emoji_zwj_still_detected(self):
+        findings = scan_for_threats("alpha\u200dbeta", scope="all")
+        assert any(f.startswith("invisible_unicode_U+200D") for f in findings)
+
     def test_invisible_chars_set_is_frozenset(self):
         # Pin: should be immutable so callers can't accidentally mutate the
         # shared set.

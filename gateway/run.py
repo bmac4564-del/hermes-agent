@@ -3051,20 +3051,20 @@ class GatewayRunner:
         lock error so a missing/broken parent never blocks the existing
         interrupt path.
         """
-        if running_agent is None or running_agent is _AGENT_PENDING_SENTINEL:
-            return False
-        children = getattr(running_agent, "_active_children", None)
-        # AIAgent always initialises this as a concrete list (see
-        # agent/agent_init.py). Reject anything that isn't a real
-        # collection — this guards against ``MagicMock()._active_children``
-        # auto-creating a truthy stub in tests and triggering the demotion
-        # against an agent that doesn't actually have subagents.
-        if not isinstance(children, (list, tuple, set)):
-            return False
-        if not children:
-            return False
-        lock = getattr(running_agent, "_active_children_lock", None)
         try:
+            if running_agent is None or running_agent is _AGENT_PENDING_SENTINEL:
+                return False
+            children = getattr(running_agent, "_active_children", None)
+            # AIAgent always initialises this as a concrete list (see
+            # agent/agent_init.py). Reject anything that isn't a real
+            # collection — this guards against ``MagicMock()._active_children``
+            # auto-creating a truthy stub in tests and triggering the demotion
+            # against an agent that doesn't actually have subagents.
+            if not isinstance(children, (list, tuple, set)):
+                return False
+            if not children:
+                return False
+            lock = getattr(running_agent, "_active_children_lock", None)
             if lock is not None:
                 with lock:
                     return bool(children)

@@ -1236,6 +1236,61 @@ def test_load_pool_api_key_path_skips_oauth_autodiscovery(tmp_path, monkeypatch)
     assert cc_called["n"] == 0
 
 
+def test_load_pool_env_file_blank_oauth_suppresses_ambient_oauth(
+    tmp_path, monkeypatch
+):
+    """A blank OAuth var in ~/.hermes/.env is an explicit setup choice.
+
+    The env file must win over ambient shell exports even when the env-file
+    value is blank; otherwise a stale shell ANTHROPIC_TOKEN can defeat the
+    API-key path selected by setup.
+    """
+    hermes_home = tmp_path / "hermes"
+    hermes_home.mkdir(parents=True)
+    (hermes_home / ".env").write_text(
+        "ANTHROPIC_API_KEY=sk-ant-api03-explicit-user-key\n"
+        "ANTHROPIC_TOKEN=\n"
+        "CLAUDE_CODE_OAUTH_TOKEN=\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+    monkeypatch.setenv("ANTHROPIC_TOKEN", "sk-ant-oat01-ambient-stale-token")
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-ambient-cc-token")
+    _write_auth_store(tmp_path, {"version": 1, "providers": {}})
+    monkeypatch.setattr("hermes_cli.auth.is_provider_explicitly_configured", lambda pid: True)
+
+    pkce_called = {"n": 0}
+    cc_called = {"n": 0}
+
+    def _fake_pkce():
+        pkce_called["n"] += 1
+        return {
+            "accessToken": "sk-ant-oat01-pkce-token",
+            "refreshToken": "pkce-refresh",
+            "expiresAt": int(time.time() * 1000) + 3_600_000,
+        }
+
+    def _fake_cc():
+        cc_called["n"] += 1
+        return {
+            "accessToken": "sk-ant-oat01-claude-code-token",
+            "refreshToken": "cc-refresh",
+            "expiresAt": int(time.time() * 1000) + 3_600_000,
+        }
+
+    monkeypatch.setattr("agent.anthropic_adapter.read_hermes_oauth_credentials", _fake_pkce)
+    monkeypatch.setattr("agent.anthropic_adapter.read_claude_code_credentials", _fake_cc)
+
+    from agent.credential_pool import load_pool
+
+    pool = load_pool("anthropic")
+    sources = {entry.source for entry in pool.entries()}
+
+    assert sources == {"env:ANTHROPIC_API_KEY"}
+    assert pkce_called["n"] == 0
+    assert cc_called["n"] == 0
+
+
 def test_load_pool_api_key_path_prunes_stale_oauth_entries(tmp_path, monkeypatch):
     """Switching OAuth -> API key must prune stale OAuth entries from auth.json.
 

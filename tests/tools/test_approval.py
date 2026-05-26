@@ -704,6 +704,26 @@ class TestGatewayProtection:
             assert hardline is True, command
             assert "gateway self-restart" in desc
 
+    def test_gateway_self_restart_hardline_ignores_prose_and_search_mentions(
+        self, monkeypatch
+    ):
+        monkeypatch.setattr(
+            approval_module,
+            "_is_running_inside_gateway_service_cgroup",
+            lambda: True,
+            raising=False,
+        )
+
+        for command in (
+            'echo "systemctl --user restart hermes-gateway.service"',
+            'grep -R "systemctl --user restart hermes-gateway.service" docs/',
+            "cat <<'EOF'\nsystemctl --user restart hermes-gateway.service\nEOF",
+            "printf '%s\\n' 'hermes gateway restart'",
+        ):
+            hardline, desc = approval_module.detect_hardline_command(command)
+            assert hardline is False, command
+            assert desc is None
+
     def test_gateway_self_restart_hardline_beats_yolo(self, monkeypatch):
         """Session yolo must not bypass a gateway-owned self-restart."""
         monkeypatch.setattr(

@@ -49,6 +49,12 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+_INTERNAL_BLOCKED_ENTRY_RE = re.compile(
+    r"^\[BLOCKED: [^\]]+ entry contained threat pattern\(s\): "
+    r"[A-Za-z0-9_,+:\- ]+\. Removed from system prompt"
+    r"(?:; [^\]]+)?\.\]$"
+)
+
 # Where memory files live — resolved dynamically so profile overrides
 # (HERMES_HOME env var changes) are always respected.  The old module-level
 # constant was cached at import time and could go stale if a profile switch
@@ -187,7 +193,10 @@ class MemoryStore:
 
         sanitized: List[str] = []
         for entry in entries:
-            if not entry or entry.startswith("[BLOCKED:"):
+            if not entry:
+                sanitized.append(entry)
+                continue
+            if entry.startswith("[BLOCKED:") and _INTERNAL_BLOCKED_ENTRY_RE.match(entry):
                 sanitized.append(entry)
                 continue
             findings = scan_for_threats(entry, scope="strict")
@@ -718,7 +727,6 @@ registry.register(
     check_fn=check_memory_requirements,
     emoji="🧠",
 )
-
 
 
 

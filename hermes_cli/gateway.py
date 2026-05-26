@@ -1189,7 +1189,13 @@ def _print_systemd_inaccessible_status(snapshot: GatewayRuntimeSnapshot) -> None
         print()
         print("A gateway service unit is installed, but this process cannot query systemd.")
         print("Check from an unrestricted shell:")
-        print("  systemctl --user status hermes-gateway.service")
+        unit_name = get_service_name()
+        if not unit_name.endswith(".service"):
+            unit_name = f"{unit_name}.service"
+        if snapshot.service_scope == "system":
+            print(f"  systemctl status {unit_name}")
+        else:
+            print(f"  systemctl --user status {unit_name}")
 
 
 def _print_other_profiles_gateway_status() -> None:

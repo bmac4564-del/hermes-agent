@@ -125,7 +125,13 @@ def validate_runtime_payload_for_watchdog(
             return 0, ""
         return EXIT_INVALID_PAYLOAD, str(exc)
 
-    if live_pid is not None and payload_pid != live_pid:
+    if live_pid is None:
+        return (
+            EXIT_DEAD_OR_MISMATCHED_PID,
+            f"gateway live pid missing: runtime={payload_pid}",
+        )
+
+    if payload_pid != live_pid:
         return (
             EXIT_DEAD_OR_MISMATCHED_PID,
             f"gateway pid mismatch: runtime={payload_pid} live={live_pid}",

@@ -825,6 +825,8 @@ class TestEnvWriteDenylist:
             "HERMES_PROFILE",
             "HERMES_CONFIG",
             "HERMES_ENV",
+            "path",
+            "Editor",
         ],
     )
     def test_denylisted_keys_rejected(self, denied_key):

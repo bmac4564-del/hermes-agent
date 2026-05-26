@@ -9,6 +9,7 @@ from tools.cronjob_tools import (
     check_cronjob_requirements,
     cronjob,
 )
+from tools.threat_patterns import scan_for_threats
 
 
 # =========================================================================
@@ -79,6 +80,12 @@ class TestScanCronPrompt:
         assert "Blocked" in _scan_cron_prompt("normal text\u200b")
         assert "Blocked" in _scan_cron_prompt("zero\ufeffwidth")
         assert "Blocked" in _scan_cron_prompt("alpha\u200dbeta")
+
+    @pytest.mark.parametrize("char", ["\u2062", "\u2063", "\u2064", "\u2066", "\u2067", "\u2068", "\u2069"])
+    def test_invisible_operator_and_isolate_chars_share_threat_semantics(self, char):
+        assert scan_for_threats(f"hidden{char}text", scope="all")
+        assert "Blocked" in _scan_cron_prompt(f"hidden{char}text")
+        assert "Blocked" in _scan_cron_skill_assembled(f"hidden{char}text")
 
     def test_emoji_zwj_sequences_allowed(self):
         assert _scan_cron_prompt("Summarize family updates 👨‍👩‍👧 every morning") == ""

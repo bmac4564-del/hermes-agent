@@ -138,6 +138,44 @@ INVISIBLE_CHARS = frozenset({
     '\u2069',  # pop directional isolate
 })
 
+_EMOJI_NEIGHBOUR_CP_RANGES = (
+    (0x1F000, 0x1FFFF),
+    (0x2600, 0x27BF),
+    (0x2300, 0x23FF),
+    (0x1F1E6, 0x1F1FF),
+    (0x20E3, 0x20E3),
+)
+_VARIATION_SELECTOR_CP = 0xFE0F
+
+
+def _is_emoji_cp(cp: int) -> bool:
+    return any(lo <= cp <= hi for lo, hi in _EMOJI_NEIGHBOUR_CP_RANGES)
+
+
+def _zwj_has_emoji_neighbour(text: str, idx: int) -> bool:
+    left = idx - 1
+    while left >= 0 and ord(text[left]) == _VARIATION_SELECTOR_CP:
+        left -= 1
+    right = idx + 1
+    while right < len(text) and ord(text[right]) == _VARIATION_SELECTOR_CP:
+        right += 1
+    return (
+        left >= 0 and right < len(text)
+        and _is_emoji_cp(ord(text[left]))
+        and _is_emoji_cp(ord(text[right]))
+    )
+
+
+def _strip_legitimate_emoji_zwj(content: str) -> str:
+    if '\u200d' not in content:
+        return content
+    cleaned: list[str] = []
+    for idx, ch in enumerate(content):
+        if ch == '\u200d' and _zwj_has_emoji_neighbour(content, idx):
+            continue
+        cleaned.append(ch)
+    return ''.join(cleaned)
+
 
 # Compiled pattern sets, indexed by scope.  Compiled once at import time;
 # scan_for_threats() looks them up.
@@ -208,7 +246,7 @@ def scan_for_threats(content: str, scope: str = "context") -> List[str]:
 
     # Invisible unicode — single pass through the content set, not 17
     # ``in`` lookups.
-    char_set = set(content)
+    char_set = set(_strip_legitimate_emoji_zwj(content))
     invisible_hits = char_set & INVISIBLE_CHARS
     for ch in invisible_hits:
         findings.append(f"invisible_unicode_U+{ord(ch):04X}")

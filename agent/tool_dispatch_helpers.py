@@ -346,8 +346,8 @@ def make_tool_result_message(name: str, content: Any, tool_call_id: str) -> dict
 # Tools whose results carry attacker-controllable content.  Wrapping their
 # string output in ``<untrusted_tool_result>`` delimiters tells the model the
 # payload is data, not instructions — the architectural piece of the
-# promptware defense.  Skipped for short outputs (under 32 chars) where the
-# overhead of the wrapper outweighs any indirect-injection risk.
+# promptware defense. Empty strings are left alone, but any non-empty string
+# from these sources is wrapped; short payloads can still carry directives.
 _UNTRUSTED_TOOL_NAMES = frozenset({
     "web_extract",
     "web_search",
@@ -357,9 +357,6 @@ _UNTRUSTED_TOOL_PREFIXES = (
     "browser_",
     "mcp_",
 )
-
-_UNTRUSTED_WRAP_MIN_CHARS = 32
-
 
 def _is_untrusted_tool(name: Optional[str]) -> bool:
     if not name:
@@ -375,14 +372,14 @@ def _maybe_wrap_untrusted(name: str, content: Any) -> Any:
     Returns ``content`` unchanged when:
     - the tool is not in the high-risk set
     - the content is not a plain string (multimodal list, dict, None)
-    - the content is too short to be worth wrapping
+    - the content is empty
     - the content is already wrapped (re-entrancy guard, e.g. nested forwards)
     """
     if not _is_untrusted_tool(name):
         return content
     if not isinstance(content, str):
         return content
-    if len(content) < _UNTRUSTED_WRAP_MIN_CHARS:
+    if not content:
         return content
     if content.lstrip().startswith("<untrusted_tool_result"):
         return content

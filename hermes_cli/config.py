@@ -132,6 +132,9 @@ _ENV_VAR_NAME_DENYLIST: frozenset[str] = frozenset({
     # HERMES_LANGFUSE_*, HERMES_SPOTIFY_*, ...) ARE allowed.
     "HERMES_HOME", "HERMES_PROFILE", "HERMES_CONFIG", "HERMES_ENV",
 })
+_ENV_VAR_NAME_DENYLIST_CASEFOLD: frozenset[str] = frozenset(
+    name.casefold() for name in _ENV_VAR_NAME_DENYLIST
+)
 
 
 def _reject_denylisted_env_var(key: str) -> None:
@@ -140,7 +143,7 @@ def _reject_denylisted_env_var(key: str) -> None:
     Centralised so both the regular and "secure" env writers share the
     same gate, and so the message is consistent for callers.
     """
-    if key in _ENV_VAR_NAME_DENYLIST:
+    if key.casefold() in _ENV_VAR_NAME_DENYLIST_CASEFOLD:
         raise ValueError(
             f"Environment variable {key!r} is on the writer denylist. "
             "Names that influence subprocess execution (LD_PRELOAD, "

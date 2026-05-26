@@ -1658,6 +1658,28 @@ class TestOnNewMessageCallback:
         assert events == ["reset"]
 
     @pytest.mark.asyncio
+    async def test_callback_fires_on_successful_tail_flush(self):
+        """A tail flush is a fresh content bubble and must notify too."""
+        adapter = MagicMock()
+        adapter.send = AsyncMock(return_value=SimpleNamespace(success=True, message_id="msg_2"))
+        adapter.edit_message = AsyncMock(return_value=SimpleNamespace(success=True))
+        adapter.MAX_MESSAGE_LENGTH = 4096
+
+        events = []
+        consumer = GatewayStreamConsumer(
+            adapter,
+            "chat",
+            StreamConsumerConfig(edit_interval=0.01, buffer_threshold=1),
+            on_new_message=lambda: events.append("reset"),
+        )
+        consumer._fallback_final_send = True
+        consumer._fallback_prefix = "Hello"
+        consumer._accumulated = "Hello tail"
+
+        assert await consumer._flush_segment_tail_on_edit_failure() is True
+        assert events == ["reset"]
+
+    @pytest.mark.asyncio
     async def test_callback_error_swallowed(self):
         """Exceptions in the callback do not crash the consumer."""
         adapter = MagicMock()
@@ -1788,4 +1810,3 @@ class TestUtf16OverflowDetection:
         # auto-attr mock. Verified indirectly by all the other tests in
         # this file passing — they all use MagicMock adapters.
         assert consumer is not None
-

@@ -765,7 +765,7 @@ class TestGatewayServiceDetection:
         monkeypatch.setattr(gateway_cli, "is_termux", lambda: False)
         monkeypatch.setattr(gateway_cli, "is_macos", lambda: False)
         monkeypatch.setattr(gateway_cli, "is_linux", lambda: True)
-        monkeypatch.setattr(gateway_cli, "find_gateway_pids", lambda: [])
+        monkeypatch.setattr(gateway_cli, "find_gateway_pids", lambda: [1234])
         monkeypatch.setattr(gateway_cli.watchdog_check.time, "monotonic", lambda: 110.0)
         monkeypatch.setattr(
             gateway_cli,
@@ -1263,6 +1263,26 @@ class TestGatewaySystemServiceRouting:
         assert "systemd is not accessible from this process" in out
         assert "Running manually" not in out
         assert "Gateway is not running" not in out
+
+    def test_systemd_inaccessible_hint_uses_scope_and_service_name(
+        self, monkeypatch, capsys
+    ):
+        monkeypatch.setattr(gateway_cli, "get_service_name", lambda: "hermes-gateway-prod")
+
+        gateway_cli._print_systemd_inaccessible_status(
+            gateway_cli.GatewayRuntimeSnapshot(
+                manager="systemd (system, inaccessible)",
+                service_installed=True,
+                service_running=False,
+                service_scope="system",
+                status_unknown=True,
+                authority="systemd inaccessible",
+            )
+        )
+
+        out = capsys.readouterr().out
+        assert "systemctl status hermes-gateway-prod.service" in out
+        assert "systemctl --user status hermes-gateway.service" not in out
 
     def test_gateway_status_on_termux_shows_manual_guidance(self, monkeypatch, capsys):
         monkeypatch.setattr(gateway_cli, "supports_systemd_services", lambda: False)

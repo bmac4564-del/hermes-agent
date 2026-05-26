@@ -992,6 +992,7 @@ class GatewayStreamConsumer:
             )
             if result.success:
                 self._already_sent = True
+                self._notify_new_message()
                 return True
         except Exception as e:
             logger.error("Segment-break tail flush error: %s", e)
