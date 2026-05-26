@@ -647,6 +647,82 @@ class TestGatewayProtection:
         assert dangerous is True
         assert "stop/restart" in desc
 
+    def test_systemctl_restart_hardline_blocked_inside_gateway_cgroup(self, monkeypatch):
+        """The gateway must not be able to approve killing its own service."""
+        monkeypatch.setattr(
+            approval_module,
+            "_is_running_inside_gateway_service_cgroup",
+            lambda: True,
+            raising=False,
+        )
+
+        hardline, desc = approval_module.detect_hardline_command(
+            "systemctl --user restart hermes-gateway.service"
+        )
+
+        assert hardline is True
+        assert "gateway self-restart" in desc
+
+    def test_systemctl_restart_not_hardline_outside_gateway_cgroup(self, monkeypatch):
+        """Operators outside the gateway still get the normal approval gate."""
+        monkeypatch.setattr(
+            approval_module,
+            "_is_running_inside_gateway_service_cgroup",
+            lambda: False,
+            raising=False,
+        )
+
+        hardline, hardline_desc = approval_module.detect_hardline_command(
+            "systemctl --user restart hermes-gateway.service"
+        )
+        dangerous, _key, dangerous_desc = detect_dangerous_command(
+            "systemctl --user restart hermes-gateway.service"
+        )
+
+        assert hardline is False
+        assert hardline_desc is None
+        assert dangerous is True
+        assert "stop/restart" in dangerous_desc
+
+    def test_shell_wrapped_systemctl_restart_hardline_inside_gateway_cgroup(
+        self, monkeypatch
+    ):
+        """Shell -c wrappers must not hide a gateway self-restart."""
+        monkeypatch.setattr(
+            approval_module,
+            "_is_running_inside_gateway_service_cgroup",
+            lambda: True,
+            raising=False,
+        )
+
+        for command in (
+            "/bin/sh -lc 'systemctl --user restart hermes-gateway.service'",
+            "bash -lc 'systemctl --user restart hermes-gateway.service'",
+        ):
+            hardline, desc = approval_module.detect_hardline_command(command)
+
+            assert hardline is True, command
+            assert "gateway self-restart" in desc
+
+    def test_gateway_self_restart_hardline_beats_yolo(self, monkeypatch):
+        """Session yolo must not bypass a gateway-owned self-restart."""
+        monkeypatch.setattr(
+            approval_module,
+            "_is_running_inside_gateway_service_cgroup",
+            lambda: True,
+            raising=False,
+        )
+        monkeypatch.setenv("HERMES_YOLO_MODE", "1")
+
+        result = approval_module.check_all_command_guards(
+            "systemctl --user restart hermes-gateway.service",
+            "local",
+        )
+
+        assert result["approved"] is False
+        assert result.get("hardline") is True
+        assert "gateway self-restart" in result["message"]
+
     def test_pkill_hermes_detected(self):
         """pkill targeting hermes/gateway processes must be caught."""
         cmd = 'pkill -f "cli.py --gateway"'

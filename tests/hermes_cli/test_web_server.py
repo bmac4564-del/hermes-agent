@@ -2375,3 +2375,83 @@ class TestPtyWebSocket:
             ):
                 pass
         assert exc.value.code == 4400
+
+
+class TestDashboardPluginStaticAssetAllowlist:
+    """``/dashboard-plugins/<name>/<path>`` is unauthenticated by design —
+    the SPA loads plugin JS via ``<script src>`` and CSS via
+    ``<link href>``, neither of which can attach a custom auth header.
+    Instead the route restricts file types to the browser-asset
+    allowlist (JS/CSS/JSON/images/fonts) so that user-installed
+    plugins shipping a ``plugin_api.py`` backend module don't leak
+    their Python source to anyone reachable on the loopback port.
+
+    Regression test for the dashboard pentest finding filed alongside
+    the ``web-pentest`` skill (PR #32265 / issue #32267).
+    """
+
+    @pytest.fixture(autouse=True)
+    def _setup_plugin_assets(self, tmp_path, monkeypatch, _isolate_hermes_home):
+        import hermes_cli.web_server as web_server
+
+        dashboard_dir = tmp_path / "example" / "dashboard"
+        pycache_dir = dashboard_dir / "__pycache__"
+        pycache_dir.mkdir(parents=True)
+        (dashboard_dir / "plugin_api.py").write_text("SECRET = True\n", encoding="utf-8")
+        (pycache_dir / "plugin_api.cpython-311.pyc").write_bytes(b"\0\0")
+        (dashboard_dir / "manifest.json").write_text(
+            json.dumps({"name": "example"}), encoding="utf-8"
+        )
+        (dashboard_dir / "app.js").write_text("console.log('ok')\n", encoding="utf-8")
+
+        monkeypatch.setattr(
+            web_server,
+            "_get_dashboard_plugins",
+            lambda force_rescan=False: [{"name": "example", "_dir": str(dashboard_dir)}],
+        )
+        self.web_server = web_server
+
+    async def _serve(self, plugin_name: str, file_path: str):
+        return await self.web_server.serve_plugin_asset(plugin_name, file_path)
+
+    @pytest.mark.asyncio
+    async def test_python_source_is_404(self):
+        """The example plugin's ``plugin_api.py`` must NOT be served as
+        a static asset, even though the file exists under the plugin's
+        dashboard directory. Suffix not in the allowlist → 404."""
+        with pytest.raises(self.web_server.HTTPException) as exc:
+            await self._serve("example", "plugin_api.py")
+        assert exc.value.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_pycache_is_404(self):
+        """Same protection for compiled Python (``.pyc``) inside the
+        plugin's ``__pycache__/``. Real plugins ship these as a
+        side-effect of running tests / dashboard once."""
+        with pytest.raises(self.web_server.HTTPException) as exc:
+            await self._serve("example", "__pycache__/plugin_api.cpython-311.pyc")
+        assert exc.value.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_manifest_json_still_served(self):
+        """JSON files remain browser-fetchable — manifests, localized
+        data, source maps, etc. all sit in this bucket."""
+        resp = await self._serve("example", "manifest.json")
+        assert resp.media_type == "application/json"
+        assert Path(resp.path).name == "manifest.json"
+
+    @pytest.mark.asyncio
+    async def test_unknown_plugin_is_404(self):
+        """Existing behaviour preserved: nonexistent plugin name → 404."""
+        with pytest.raises(self.web_server.HTTPException) as exc:
+            await self._serve("_definitely_not_a_plugin_", "manifest.json")
+        assert exc.value.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_path_traversal_still_blocked(self):
+        """The allowlist is on top of the existing ``.resolve()`` /
+        ``is_relative_to()`` check — a ``.js`` named file at an
+        out-of-base path is still rejected as traversal, not served."""
+        with pytest.raises(self.web_server.HTTPException) as exc:
+            await self._serve("example", "../plugin_api.py")
+        assert exc.value.status_code == 403
