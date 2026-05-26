@@ -71,7 +71,9 @@ def _package_version() -> str:
         return getattr(settings, "APP_VERSION", "0.0.0")
 
 
-async def _handle_request(payload: dict[str, Any]) -> dict[str, Any] | None:
+async def _handle_request(payload: Any) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return _error(None, -32000, "Invalid request")
     method = payload.get("method")
     message_id = payload.get("id")
     raw_params = payload.get("params")
@@ -131,7 +133,8 @@ def main() -> int:
         try:
             response = asyncio.run(_handle_request(payload))
         except Exception as exc:
-            response = _error(payload.get("id"), -32000, str(exc))
+            message_id = payload.get("id") if isinstance(payload, dict) else None
+            response = _error(message_id, -32000, str(exc))
         if response is not None:
             print(json.dumps(response, separators=(",", ":")), flush=True)
     return 0

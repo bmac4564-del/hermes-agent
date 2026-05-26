@@ -565,8 +565,9 @@ def _check_runtime_authority(runtime_authority: dict[str, Any], expected_path: P
     project_root = runtime_authority.get("project_root")
     gateway_file = runtime_authority.get("gateway_file")
     hermes_cli_file = runtime_authority.get("hermes_cli_file")
-    fields = [project_root, gateway_file, hermes_cli_file]
-    if all(value and _path_is_within(str(value), expected_path) for value in fields):
+    required_fields = [project_root, gateway_file]
+    optional_fields = [hermes_cli_file] if hermes_cli_file else []
+    if all(value and _path_is_within(str(value), expected_path) for value in [*required_fields, *optional_fields]):
         return CheckResult(
             id="runtime_import_authority",
             severity="OK",
@@ -751,17 +752,16 @@ def _check_cron_shadow_authority(paths_env: ParsedPathsEnv) -> list[CheckResult]
                 detail=str(active),
             )
         )
-        return checks
-
-    checks.append(
-        CheckResult(
-            id="cron_active_registry_present",
-            severity="OK",
-            status="ok",
-            message="Canonical cron registry is present",
-            detail=str(active),
+    else:
+        checks.append(
+            CheckResult(
+                id="cron_active_registry_present",
+                severity="OK",
+                status="ok",
+                message="Canonical cron registry is present",
+                detail=str(active),
+            )
         )
-    )
 
     if not shadow.exists():
         checks.append(

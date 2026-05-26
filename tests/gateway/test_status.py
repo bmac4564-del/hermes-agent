@@ -25,6 +25,38 @@ def test_build_runtime_import_authority_does_not_swallow_runtime_errors(monkeypa
         status._build_runtime_import_authority()
 
 
+def test_build_runtime_import_authority_survives_deleted_cwd(monkeypatch):
+    def deleted_cwd():
+        raise FileNotFoundError("cwd deleted")
+
+    monkeypatch.setattr(status.os, "getcwd", deleted_cwd)
+
+    authority = status._build_runtime_import_authority()
+
+    assert authority["cwd"] is None
+    assert authority["gateway_file"].endswith("gateway/status.py")
+
+
+def test_write_runtime_status_backfills_full_schema_for_existing_payload(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    runtime_path = tmp_path / "gateway_state.json"
+    runtime_path.write_text(json.dumps({"gateway_state": "running", "platforms": {}}), encoding="utf-8")
+
+    status.write_runtime_status(gateway_state="running")
+
+    payload = json.loads(runtime_path.read_text(encoding="utf-8"))
+    assert payload["gateway_status_schema_version"] == status._RUNTIME_STATUS_SCHEMA_VERSION
+    for key in (
+        "liveness_state",
+        "api_call_count",
+        "tool_transition_count",
+        "tool_completion_count",
+        "api_completion_count",
+        "run_lifecycle_count",
+    ):
+        assert key in payload
+
+
 class TestGatewayPidState:
     def test_write_pid_file_records_gateway_metadata(self, tmp_path, monkeypatch):
         monkeypatch.setenv("HERMES_HOME", str(tmp_path))

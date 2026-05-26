@@ -128,6 +128,28 @@ def test_connect_allows_kanban_home_under_pytest(tmp_path, monkeypatch):
     assert (kanban_root / "kanban.db").exists()
 
 
+def test_connect_rejects_kanban_home_env_outside_temp_under_pytest(monkeypatch):
+    monkeypatch.setenv("HERMES_KANBAN_HOME", "/home/test-user/.hermes")
+    monkeypatch.delenv("HERMES_KANBAN_DB", raising=False)
+    monkeypatch.delenv("HERMES_KANBAN_BOARD", raising=False)
+    monkeypatch.setattr(Path, "home", lambda: Path("/home/test-user"))
+    monkeypatch.setenv("HERMES_HOME", "/home/test-user/.hermes")
+
+    with pytest.raises(RuntimeError, match="HERMES_KANBAN_HOME outside the system temp"):
+        kb.connect()
+
+
+def test_connect_validates_kanban_db_before_kanban_home(monkeypatch):
+    monkeypatch.setenv("HERMES_KANBAN_HOME", "/tmp/hermes-kanban-test")
+    monkeypatch.setenv("HERMES_KANBAN_DB", "/home/test-user/.hermes/kanban/live.db")
+    monkeypatch.delenv("HERMES_KANBAN_BOARD", raising=False)
+    monkeypatch.setattr(Path, "home", lambda: Path("/home/test-user"))
+    monkeypatch.setenv("HERMES_HOME", "/home/test-user/.hermes")
+
+    with pytest.raises(RuntimeError, match="HERMES_KANBAN_DB points outside"):
+        kb.connect()
+
+
 def test_connect_allows_kanban_db_env_under_pytest(tmp_path, monkeypatch):
     pinned_db = tmp_path / "pinned" / "kanban.db"
     monkeypatch.delenv("HERMES_KANBAN_HOME", raising=False)

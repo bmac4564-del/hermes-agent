@@ -213,6 +213,11 @@ def _build_pid_record() -> dict:
 
 def _build_runtime_import_authority() -> dict[str, Any]:
     try:
+        cwd = os.getcwd()
+    except OSError:
+        cwd = None
+
+    try:
         import hermes_cli
     except (ImportError, ModuleNotFoundError):
         hermes_cli_file = None
@@ -223,7 +228,7 @@ def _build_runtime_import_authority() -> dict[str, Any]:
     hermes_home = get_hermes_home()
     return {
         "python_executable": sys.executable,
-        "cwd": os.getcwd(),
+        "cwd": cwd,
         "sys_path0": sys.path[0] if sys.path else None,
         "gateway_file": str(Path(__file__).resolve()),
         "hermes_cli_file": hermes_cli_file,
@@ -585,7 +590,9 @@ def write_runtime_status(
 ) -> None:
     """Persist gateway runtime health information for diagnostics/status."""
     path = _get_runtime_status_path()
-    payload = _read_json_file(path) or _build_runtime_status_record()
+    payload = _read_json_file(path) or {}
+    for key, value in _build_runtime_status_record().items():
+        payload.setdefault(key, value)
     current_record = _build_pid_record()
     payload.setdefault("platforms", {})
     payload["kind"] = current_record["kind"]
