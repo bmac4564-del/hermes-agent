@@ -239,12 +239,66 @@ def _build_runtime_import_authority() -> dict[str, Any]:
     }
 
 
+def _safe_git_head(repo_root: Path) -> Optional[str]:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except Exception:
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def _path_is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def _build_runtime_authority() -> dict[str, Any]:
+    project_root = Path(__file__).resolve().parents[1]
+    authority_path = os.getenv("HERMES_AGENT_REPO") or str(project_root)
+    release_sha = (os.getenv("HERMES_RELEASE_SHA") or "").strip() or None
+    source_head = _safe_git_head(project_root)
+    bundled_plugins_dir = Path(
+        os.getenv("HERMES_BUNDLED_PLUGINS") or (project_root / "plugins")
+    )
+    try:
+        bundled_plugins_dir = bundled_plugins_dir.resolve()
+    except OSError:
+        bundled_plugins_dir = bundled_plugins_dir.absolute()
+
+    return {
+        "authority_path": authority_path,
+        "project_root": str(project_root),
+        "source_head": source_head,
+        "release_sha": release_sha,
+        "release_sha_matches_source_head": bool(
+            release_sha and source_head and release_sha == source_head
+        ),
+        "bundled_plugins_dir": str(bundled_plugins_dir),
+        "bundled_plugins_under_project_root": _path_is_relative_to(
+            bundled_plugins_dir,
+            project_root,
+        ),
+    }
+
+
 def _build_runtime_status_record() -> dict[str, Any]:
     payload = _build_pid_record()
     payload.update({
         "gateway_status_schema_version": _RUNTIME_STATUS_SCHEMA_VERSION,
         "gateway_state": "starting",
         "runtime_import_authority": _build_runtime_import_authority(),
+        "runtime_authority": _build_runtime_authority(),
         "exit_reason": None,
         "stop_source": None,
         "restart_requested": False,
@@ -601,6 +655,8 @@ def write_runtime_status(
     payload["argv"] = current_record["argv"]
     payload["start_time"] = current_record["start_time"]
     payload["runtime_import_authority"] = _build_runtime_import_authority()
+    payload["runtime_authority"] = _build_runtime_authority()
+    payload.pop("runtime_plugins", None)
     payload["updated_at"] = _utc_now_iso()
 
     if gateway_state is not _UNSET:

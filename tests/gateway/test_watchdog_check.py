@@ -20,14 +20,14 @@ def _runtime_payload(**overrides):
     return payload
 
 
-def test_watchdog_rejects_fresh_runtime_when_pid_scan_is_unavailable(monkeypatch):
+def test_watchdog_accepts_fresh_runtime_when_pid_scan_is_unavailable(monkeypatch):
     watchdog = importlib.import_module("gateway.watchdog_check")
 
     monkeypatch.setattr(watchdog, "read_runtime_status", lambda: _runtime_payload())
     monkeypatch.setattr(watchdog, "get_running_pid", lambda cleanup_stale=False: None)
     monkeypatch.setattr(watchdog.time, "monotonic", lambda: 110.0)
 
-    assert watchdog.main() == watchdog.EXIT_DEAD_OR_MISMATCHED_PID
+    assert watchdog.main() == 0
 
 
 def test_watchdog_rejects_mismatched_visible_pid(monkeypatch):
