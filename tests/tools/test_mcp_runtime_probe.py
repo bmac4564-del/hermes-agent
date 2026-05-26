@@ -128,6 +128,35 @@ def test_normalizes_hermes_codex_and_claude_configs_without_secret_values():
     assert "/usr/local/bin/npx" not in encoded
 
 
+def test_url_summary_strips_userinfo_from_redacted_host():
+    from tools.mcp_runtime_probe import normalize_mcp_servers
+
+    servers = normalize_mcp_servers(
+        {
+            "hermes": {
+                "mcp_servers": {
+                    "credentialed": {
+                        "url": "https://user:pass@example.test:8443/mcp",
+                    }
+                }
+            }
+        }
+    )
+
+    summary = servers[0].redacted_summary()
+    assert summary["url"] == {"host": "example.test:8443", "path": "/mcp"}
+    assert "user" not in json.dumps(summary)
+    assert "pass" not in json.dumps(summary)
+
+
+def test_normalize_mcp_servers_ignores_truthy_non_mapping_mcp_block():
+    from tools.mcp_runtime_probe import normalize_mcp_servers
+
+    servers = normalize_mcp_servers({"hermes": {"mcp": "not-a-mapping"}})
+
+    assert servers == []
+
+
 def test_normalizes_string_args_as_one_arg_not_characters():
     from tools.mcp_runtime_probe import normalize_mcp_servers
 

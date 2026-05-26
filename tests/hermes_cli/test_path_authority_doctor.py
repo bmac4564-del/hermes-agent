@@ -185,6 +185,36 @@ def test_report_redacts_secret_like_execstart_values(tmp_path):
     assert "[REDACTED]" in encoded
 
 
+def test_runtime_authority_allows_missing_optional_hermes_cli_file(tmp_path):
+    target = tmp_path / "agent"
+    gateway_file = target / "gateway" / "status.py"
+    gateway_file.parent.mkdir(parents=True)
+    runtime_authority = {
+        "project_root": str(target),
+        "gateway_file": str(gateway_file),
+    }
+
+    check = pad._check_runtime_authority(runtime_authority, target)
+
+    assert check.status == "ok"
+
+
+def test_runtime_authority_rejects_out_of_bounds_optional_hermes_cli_file(tmp_path):
+    target = tmp_path / "agent"
+    gateway_file = target / "gateway" / "status.py"
+    gateway_file.parent.mkdir(parents=True)
+    runtime_authority = {
+        "project_root": str(target),
+        "gateway_file": str(gateway_file),
+        "hermes_cli_file": str(tmp_path / "other" / "hermes_cli" / "__init__.py"),
+    }
+
+    check = pad._check_runtime_authority(runtime_authority, target)
+
+    assert check.status == "fail"
+    assert check.severity == "P0"
+
+
 def test_live_runtime_authority_missing_is_p0_when_live_checks_enabled(tmp_path, monkeypatch):
     target = tmp_path / "agent"
     target.mkdir()
@@ -240,6 +270,28 @@ def test_cron_shadow_registry_requires_non_authoritative_marker(tmp_path):
 
     failed = {check.id: check for check in checks if check.status != "ok"}
     assert failed["cron_shadow_registry_unclassified"].severity == "P1"
+
+
+def test_cron_shadow_registry_still_checked_when_active_registry_missing(tmp_path):
+    hermes_home = tmp_path / "hermes"
+    shadow_dir = hermes_home / "cron" / "cron"
+    shadow_dir.mkdir(parents=True)
+    (shadow_dir / "jobs.json").write_text(
+        json.dumps({"jobs": [{"id": "old", "enabled": True, "script": "/root/stale.sh"}]}),
+        encoding="utf-8",
+    )
+    paths_env = pad.ParsedPathsEnv(
+        path=tmp_path / "paths.env",
+        exists=True,
+        values={"HERMES_HOME": str(hermes_home)},
+        redacted={"HERMES_HOME": str(hermes_home)},
+    )
+
+    checks = pad._check_cron_shadow_authority(paths_env)
+    by_id = {check.id: check for check in checks}
+
+    assert by_id["cron_active_registry_missing"].status == "warn"
+    assert by_id["cron_shadow_registry_unclassified"].severity == "P1"
 
 
 def test_cron_shadow_registry_marker_classifies_shadow_as_quarantined(tmp_path):

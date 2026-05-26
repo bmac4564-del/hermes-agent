@@ -8,6 +8,10 @@ from gateway.run import GatewayRunner, _parse_liveness_interval
 def test_parse_liveness_interval_defaults_invalid_values_and_enforces_floor():
     assert _parse_liveness_interval(None) == 15.0
     assert _parse_liveness_interval("not-a-number") == 15.0
+    assert _parse_liveness_interval("inf") == 15.0
+    assert _parse_liveness_interval("-inf") == 15.0
+    assert _parse_liveness_interval("nan") == 15.0
+    assert _parse_liveness_interval("1e309") == 15.0
     assert _parse_liveness_interval("0") == 1.0
     assert _parse_liveness_interval("0.5") == 1.0
     assert _parse_liveness_interval("30") == 30.0
@@ -37,6 +41,22 @@ def test_liveness_runner_helper_matches_constructor_state():
     assert runner._liveness_last_forward_progress_at is None
     assert runner._liveness_last_progress_tuple is None
     assert runner._liveness_run_lifecycle_count == 0
+
+
+def test_start_liveness_publisher_continues_after_bootstrap_publish_failure(monkeypatch):
+    runner = _runner_for_liveness()
+    calls = []
+
+    def fail_initial_publish():
+        calls.append("publish")
+        raise RuntimeError("status path temporarily unavailable")
+
+    monkeypatch.setattr(runner, "_publish_liveness_snapshot", fail_initial_publish)
+    monkeypatch.setattr(runner, "_start_liveness_thread", lambda: calls.append("thread"))
+
+    runner._start_liveness_publisher()
+
+    assert calls == ["publish", "thread"]
 
 
 def test_liveness_snapshot_does_not_advance_forward_progress_without_activity(monkeypatch):

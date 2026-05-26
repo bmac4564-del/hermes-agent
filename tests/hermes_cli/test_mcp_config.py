@@ -601,6 +601,32 @@ class TestDispatcher:
         assert payload["kwargs"]["runtime"] == "codex"
         assert payload["kwargs"]["server_name"] == "context7"
 
+    def test_runtime_probe_rejects_negative_timeout_before_probe(self, monkeypatch, capsys):
+        from hermes_cli.mcp_config import mcp_command
+
+        async def fail_if_called(**_kwargs):
+            raise AssertionError("negative timeout must not run the probe")
+
+        monkeypatch.setattr(
+            "tools.mcp_runtime_probe.probe_default_sources",
+            fail_if_called,
+        )
+
+        mcp_command(
+            _make_args(
+                mcp_action="runtime-probe",
+                runtime="codex",
+                server="context7",
+                timeout=-1,
+                skip_auth_needed=True,
+                include_google_drive_auth_needed=False,
+            )
+        )
+
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["status"] == "error"
+        assert payload["error"]["kind"] == "invalid_timeout"
+
     def test_runtime_probe_generic_exception_emits_structured_json(
         self, monkeypatch, capsys,
     ):

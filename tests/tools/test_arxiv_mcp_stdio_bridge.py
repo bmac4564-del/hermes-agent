@@ -116,6 +116,23 @@ def test_resources_list_is_explicitly_unsupported(bridge):
     assert response["error"]["message"] == "Method not found: resources/list"
 
 
+def test_non_object_json_request_returns_error_frame(bridge):
+    response = _run(bridge._handle_request([]))
+
+    assert response["id"] is None
+    assert response["error"]["code"] == -32000
+    assert response["error"]["message"] == "Invalid request"
+
+
+def test_main_handles_non_object_json_without_crashing(bridge, monkeypatch, capsys):
+    monkeypatch.setattr(sys, "stdin", io.StringIO('[]\nnull\n"oops"\n'))
+
+    assert bridge.main() == 0
+
+    outputs = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert [payload["error"]["code"] for payload in outputs] == [-32000, -32000, -32000]
+
+
 def test_initialized_notification_is_silent(bridge):
     assert (
         _run(

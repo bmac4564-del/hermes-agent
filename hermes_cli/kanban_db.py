@@ -1155,8 +1155,6 @@ def _ensure_pytest_kanban_path_isolated(db_path: Optional[Path]) -> None:
         return
     if not os.environ.get("PYTEST_CURRENT_TEST"):
         return
-    if os.environ.get("HERMES_KANBAN_HOME", "").strip():
-        return
     kanban_db = os.environ.get("HERMES_KANBAN_DB", "").strip()
     if kanban_db:
         if _path_is_under_system_temp(kanban_db):
@@ -1166,7 +1164,18 @@ def _ensure_pytest_kanban_path_isolated(db_path: Optional[Path]) -> None:
             "HERMES_KANBAN_DB points outside the system temp directory. "
             "This would write test data to a non-isolated SQLite DB. "
             "Fix: set HERMES_KANBAN_DB to a temp path, set "
-            "HERMES_KANBAN_HOME, or pass db_path explicitly."
+            "HERMES_KANBAN_HOME to a temp path, or pass db_path explicitly."
+        )
+
+    kanban_home = os.environ.get("HERMES_KANBAN_HOME", "").strip()
+    if kanban_home:
+        if _path_is_under_system_temp(kanban_home):
+            return
+        raise RuntimeError(
+            "kanban DB opened from a pytest session with "
+            "HERMES_KANBAN_HOME outside the system temp directory. "
+            "This can write test data into live Hermes state. "
+            "Fix: set HERMES_KANBAN_HOME to a temp path."
         )
 
     hermes_home = os.environ.get("HERMES_HOME", "").strip()
@@ -1206,11 +1215,18 @@ def _ensure_pytest_kanban_filesystem_path_isolated(path: Path) -> None:
     if not os.environ.get("PYTEST_CURRENT_TEST"):
         return
 
-    override = os.environ.get("HERMES_KANBAN_HOME", "").strip()
-    if override and _path_is_under(override, path):
-        return
     if _path_is_under_system_temp(path):
         return
+
+    override = os.environ.get("HERMES_KANBAN_HOME", "").strip()
+    if override:
+        if _path_is_under_system_temp(override) and _path_is_under(override, path):
+            return
+        raise RuntimeError(
+            "kanban filesystem mutation from a pytest session with "
+            "HERMES_KANBAN_HOME outside the system temp directory. "
+            "Fix: set HERMES_KANBAN_HOME to an isolated temp root."
+        )
 
     raise RuntimeError(
         "kanban filesystem mutation from a pytest session without an "

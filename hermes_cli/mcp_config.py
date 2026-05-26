@@ -747,6 +747,22 @@ def cmd_mcp_runtime_probe(args):
     """Run the redacted MCP runtime-depth probe."""
     from tools.mcp_runtime_probe import probe_default_sources
 
+    timeout_s = getattr(args, "timeout", 120)
+    if timeout_s < 0:
+        report = {
+            "status": "error",
+            "status_counts": {"error": 1},
+            "check_status_counts": {"error": 1},
+            "servers": [],
+            "status_classes": ["error"],
+            "status_samples": {},
+            "error": {
+                "kind": "invalid_timeout",
+            },
+        }
+        print(json.dumps(report, indent=2, sort_keys=True))
+        return
+
     async def _run_probe() -> dict[str, Any]:
         return await asyncio.wait_for(
             probe_default_sources(
@@ -757,7 +773,7 @@ def cmd_mcp_runtime_probe(args):
                     or not getattr(args, "include_google_drive_auth_needed", False)
                 ),
             ),
-            timeout=getattr(args, "timeout", 120) if getattr(args, "timeout", 120) > 0 else None,
+            timeout=timeout_s if timeout_s > 0 else None,
         )
 
     try:

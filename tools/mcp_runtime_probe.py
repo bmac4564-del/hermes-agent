@@ -85,9 +85,12 @@ def _url_summary(url: str | None) -> dict[str, str] | None:
     if not url:
         return None
     parsed = urlparse(url)
-    if not parsed.netloc:
+    if not parsed.hostname:
         return None
-    return {"host": parsed.netloc, "path": parsed.path or "/"}
+    host = parsed.hostname
+    if parsed.port is not None:
+        host = f"{host}:{parsed.port}"
+    return {"host": host, "path": parsed.path or "/"}
 
 
 def _command_summary(command: str | None, args: tuple[str, ...]) -> dict[str, Any] | None:
@@ -193,10 +196,12 @@ def normalize_mcp_servers(raw_configs: Mapping[str, Any]) -> list[NormalizedMCPS
     for source, raw_config in raw_configs.items():
         if not isinstance(raw_config, Mapping):
             continue
+        mcp_block = raw_config.get("mcp")
+        mcp_servers = mcp_block.get("servers") if isinstance(mcp_block, Mapping) else None
         servers = (
             raw_config.get("mcp_servers")
             or raw_config.get("mcpServers")
-            or (raw_config.get("mcp") or {}).get("servers")
+            or mcp_servers
         )
         if not isinstance(servers, Mapping):
             continue

@@ -29,6 +29,7 @@ import dataclasses
 import inspect
 import json
 import logging
+import math
 import os
 import re
 import shlex
@@ -1658,6 +1659,8 @@ def _parse_liveness_interval(raw_value: str | None) -> float:
     try:
         parsed = float(raw_value if raw_value is not None else "15")
     except (TypeError, ValueError):
+        parsed = 15.0
+    if not math.isfinite(parsed):
         parsed = 15.0
     return max(1.0, parsed)
 
@@ -4320,8 +4323,7 @@ class GatewayRunner:
         self._wire_teams_pipeline_runtime()
 
         self._running = True
-        self._publish_liveness_snapshot()
-        self._start_liveness_thread()
+        self._start_liveness_publisher()
         self._update_runtime_status("running")
         
         # Emit gateway:startup hook
@@ -6333,6 +6335,14 @@ class GatewayRunner:
                 logger.debug("Gateway liveness publish error: %s", exc)
             if self._liveness_stop.wait(self._liveness_interval):
                 break
+
+    def _start_liveness_publisher(self) -> None:
+        """Start heartbeat publication without letting bootstrap failures abort startup."""
+        try:
+            self._publish_liveness_snapshot()
+        except Exception as exc:
+            logger.warning("Initial gateway liveness publish failed: %s", exc)
+        self._start_liveness_thread()
 
     def _start_liveness_thread(self) -> None:
         self._ensure_liveness_state()
