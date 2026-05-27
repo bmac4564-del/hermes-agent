@@ -211,7 +211,13 @@ def test_config_enabled_hard_stop_concurrent_path_does_not_submit_blocked_calls_
     assert executed == [("web_search", allowed_args, "c-allow")]
     assert [m["tool_call_id"] for m in messages] == ["c-block", "c-allow"]
     assert "repeated_exact_failure_block" in messages[0]["content"]
-    assert json.loads(messages[1]["content"]) == {"ok": "allowed"}
+    # web_search is an untrusted external-content surface, so even successful
+    # concurrent results are wrapped before being appended to model history.
+    # The guardrail contract under test is ordering + skip semantics, not raw
+    # JSON framing.
+    allowed_content = messages[1]["content"]
+    assert allowed_content.startswith('<untrusted_tool_result source="web_search">')
+    assert json.dumps({"ok": "allowed"}) in allowed_content
     assert starts == [("c-allow", "web_search", allowed_args)]
     started_events = [event for event in progress_events if event[0] == "tool.started"]
     completed_events = [event for event in progress_events if event[0] == "tool.completed"]
