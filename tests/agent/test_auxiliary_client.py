@@ -2223,6 +2223,138 @@ class TestCodexAdapterReasoningTranslation:
         assert captured.get("include") == ["reasoning.encrypted_content"]
 
 
+class TestCodexAuxiliaryAdapterStreamSchemaDrift:
+    class _FakeStream:
+        def __init__(self, events=(), iter_error=None, final_response=None):
+            self._events = list(events)
+            self._iter_error = iter_error
+            self._final_response = final_response
+            self.final_called = False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def __iter__(self):
+            for event in self._events:
+                yield event
+            if self._iter_error is not None:
+                raise self._iter_error
+
+        def get_final_response(self):
+            self.final_called = True
+            return self._final_response or SimpleNamespace(output=[], usage=None)
+
+    @staticmethod
+    def _adapter_for_stream(stream):
+        fake_client = SimpleNamespace(
+            responses=SimpleNamespace(stream=lambda **kwargs: stream)
+        )
+        return _CodexCompletionsAdapter(fake_client, "gpt-5.5")
+
+    def test_recovers_items_when_sdk_raises_none_output_typeerror_after_events(self):
+        output_item = SimpleNamespace(
+            type="message",
+            role="assistant",
+            status="completed",
+            content=[SimpleNamespace(type="output_text", text="aux item backfill ok")],
+        )
+        stream = self._FakeStream(
+            events=[
+                SimpleNamespace(type="response.output_text.delta", delta="ignored "),
+                SimpleNamespace(type="response.output_item.done", item=output_item),
+            ],
+            iter_error=TypeError("'NoneType' object is not iterable"),
+        )
+        adapter = self._adapter_for_stream(stream)
+
+        response = adapter.create(messages=[{"role": "user", "content": "summarize"}])
+
+        assert stream.final_called is False
+        assert response.choices[0].message.content == "aux item backfill ok"
+
+    def test_recovers_text_when_sdk_raises_none_output_typeerror_after_events(self):
+        stream = self._FakeStream(
+            events=[
+                SimpleNamespace(type="response.output_text.delta", delta="aux "),
+                SimpleNamespace(type="response.output_text.delta", delta="delta backfill ok"),
+            ],
+            iter_error=TypeError("'NoneType' object is not iterable"),
+        )
+        adapter = self._adapter_for_stream(stream)
+
+        response = adapter.create(messages=[{"role": "user", "content": "summarize"}])
+
+        assert stream.final_called is False
+        assert response.choices[0].message.content == "aux delta backfill ok"
+
+    def test_backfills_when_final_response_output_is_none(self):
+        output_item = SimpleNamespace(
+            type="message",
+            role="assistant",
+            status="completed",
+            content=[SimpleNamespace(type="output_text", text="aux none output backfill ok")],
+        )
+        stream = self._FakeStream(
+            events=[SimpleNamespace(type="response.output_item.done", item=output_item)],
+            final_response=SimpleNamespace(output=None, usage=None),
+        )
+        adapter = self._adapter_for_stream(stream)
+
+        response = adapter.create(messages=[{"role": "user", "content": "summarize"}])
+
+        assert stream.final_called is True
+        assert response.choices[0].message.content == "aux none output backfill ok"
+
+    def test_raises_schema_error_when_final_response_has_no_output(self):
+        from agent.codex_stream_schema import CodexStreamSchemaError
+
+        stream = self._FakeStream(final_response=SimpleNamespace(output=[], usage=None))
+        adapter = self._adapter_for_stream(stream)
+
+        with pytest.raises(CodexStreamSchemaError, match="no safe output backfill"):
+            adapter.create(messages=[{"role": "user", "content": "summarize"}])
+
+    def test_raises_schema_error_when_none_output_typeerror_has_no_safe_output(self):
+        from agent.codex_stream_schema import CodexStreamSchemaError
+
+        stream = self._FakeStream(
+            events=[SimpleNamespace(type="response.function_call_arguments.delta", delta="{}")],
+            iter_error=TypeError("'NoneType' object is not iterable"),
+        )
+        adapter = self._adapter_for_stream(stream)
+
+        with pytest.raises(CodexStreamSchemaError, match="no safe output backfill"):
+            adapter.create(messages=[{"role": "user", "content": "summarize"}])
+
+    def test_does_not_synthesize_text_after_function_call_item_marker(self):
+        from agent.codex_stream_schema import CodexStreamSchemaError
+
+        stream = self._FakeStream(
+            events=[
+                SimpleNamespace(type="response.output_text.delta", delta="unsafe text"),
+                SimpleNamespace(type="response.output_item.added", item=SimpleNamespace(type="function_call")),
+            ],
+            iter_error=TypeError("'NoneType' object is not iterable"),
+        )
+        adapter = self._adapter_for_stream(stream)
+
+        with pytest.raises(CodexStreamSchemaError, match="no safe output backfill"):
+            adapter.create(messages=[{"role": "user", "content": "summarize"}])
+
+    def test_unrelated_typeerror_still_raises(self):
+        stream = self._FakeStream(
+            events=[SimpleNamespace(type="response.output_text.delta", delta="aux")],
+            iter_error=TypeError("different stream bug"),
+        )
+        adapter = self._adapter_for_stream(stream)
+
+        with pytest.raises(TypeError, match="different stream bug"):
+            adapter.create(messages=[{"role": "user", "content": "summarize"}])
+
+
 class TestVisionAutoSkipsKimiCoding:
     """_resolve_auto vision branch skips providers that have no vision on
     their main endpoint (e.g. Kimi Coding Plan /coding) and falls through
