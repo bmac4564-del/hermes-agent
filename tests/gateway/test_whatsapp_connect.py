@@ -14,7 +14,7 @@ Regression tests for two bugs in WhatsAppAdapter.connect():
 
 import asyncio
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
@@ -531,12 +531,18 @@ class TestHttpSessionLifecycle:
              patch("gateway.platforms.whatsapp.asyncio.sleep", new_callable=AsyncMock):
             await adapter.disconnect()
 
-        mock_run.assert_called_once_with(
+        # Runtime-status updates may also shell out for release metadata while
+        # disconnect is marking the platform offline.  The Windows lifecycle
+        # contract here is narrower: disconnect must issue exactly one tree
+        # kill for the bridge PID and must not fall back to direct process
+        # termination.
+        expected_taskkill = call(
             ["taskkill", "/PID", "12345", "/T"],
             capture_output=True,
             text=True,
             timeout=10,
         )
+        assert mock_run.mock_calls.count(expected_taskkill) == 1
         mock_proc.terminate.assert_not_called()
         mock_proc.kill.assert_not_called()
 
