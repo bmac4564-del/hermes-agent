@@ -85,6 +85,11 @@ def _termux_voice_capture_available() -> bool:
     return _termux_microphone_command() is not None and _termux_api_app_installed()
 
 
+def _host_audio_forwarding_configured() -> bool:
+    """Return True when a host PulseAudio/PipeWire endpoint was forwarded."""
+    return bool(os.environ.get('PULSE_SERVER') or os.environ.get('PIPEWIRE_REMOTE'))
+
+
 def detect_audio_environment() -> dict:
     """Detect if the current environment supports audio I/O.
 
@@ -108,7 +113,7 @@ def detect_audio_environment() -> dict:
     # (issue #21203).  Only block when no forwarding is configured.
     from hermes_constants import is_container
     if is_container():
-        if os.environ.get('PULSE_SERVER') or os.environ.get('PIPEWIRE_REMOTE'):
+        if _host_audio_forwarding_configured():
             notices.append("Running inside container (Docker/Podman/LXC) with host audio forwarding")
         else:
             warnings.append(
@@ -120,18 +125,20 @@ def detect_audio_environment() -> dict:
                 "    PipeWire:    -e PIPEWIRE_REMOTE=$XDG_RUNTIME_DIR/pipewire-0"
             )
 
-    # WSL detection — PulseAudio bridge makes audio work in WSL.
-    # Only block if PULSE_SERVER is not configured.
+    # WSL detection — host audio forwarding makes audio work in WSL.
+    # Only block if neither PulseAudio nor PipeWire forwarding is configured.
     try:
         with open('/proc/version', 'r', encoding="utf-8") as f:
             if 'microsoft' in f.read().lower():
                 if os.environ.get('PULSE_SERVER'):
                     notices.append("Running in WSL with PulseAudio bridge")
+                elif os.environ.get('PIPEWIRE_REMOTE'):
+                    notices.append("Running in WSL with PipeWire bridge")
                 else:
                     warnings.append(
-                        "Running in WSL -- audio requires PulseAudio bridge.\n"
-                        "  1. Set PULSE_SERVER=unix:/mnt/wslg/PulseServer\n"
-                        "  2. Create ~/.asoundrc pointing ALSA at PulseAudio\n"
+                        "Running in WSL -- audio requires a PulseAudio or PipeWire bridge.\n"
+                        "  1. Set PULSE_SERVER=unix:/mnt/wslg/PulseServer (or forward PIPEWIRE_REMOTE)\n"
+                        "  2. Create ~/.asoundrc pointing ALSA at PulseAudio when using PulseAudio\n"
                         "  3. Verify with: arecord -d 3 /tmp/test.wav && aplay /tmp/test.wav"
                     )
     except (FileNotFoundError, PermissionError, OSError):
@@ -143,17 +150,18 @@ def detect_audio_environment() -> dict:
         try:
             devices = sd.query_devices()
             if not devices:
-                if os.environ.get('PULSE_SERVER'):
-                    notices.append("No PortAudio devices detected but PULSE_SERVER is set -- continuing")
+                if _host_audio_forwarding_configured():
+                    notices.append("No PortAudio devices detected but host audio forwarding is configured -- continuing")
                 elif termux_capture:
                     notices.append("No PortAudio devices detected, but Termux:API microphone capture is available")
                 else:
                     warnings.append("No audio input/output devices detected")
         except Exception:
-            # In WSL with PulseAudio, device queries can fail even though
-            # recording/playback works fine. Don't block if PULSE_SERVER is set.
-            if os.environ.get('PULSE_SERVER'):
-                notices.append("Audio device query failed but PULSE_SERVER is set -- continuing")
+            # In WSL/containers with host forwarding, device queries can fail
+            # even though recording/playback works fine. Don't block if a
+            # PulseAudio or PipeWire endpoint was explicitly forwarded.
+            if _host_audio_forwarding_configured():
+                notices.append("Audio device query failed but host audio forwarding is configured -- continuing")
             elif termux_capture:
                 notices.append("PortAudio device query failed, but Termux:API microphone capture is available")
             else:
