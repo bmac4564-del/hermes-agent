@@ -51,3 +51,26 @@ def test_reload_runtime_env_keeps_env_max_iterations_when_config_omits_key(
     gateway_run._reload_runtime_env_preserving_config_authority()
 
     assert os.environ["HERMES_MAX_ITERATIONS"] == "123"
+
+
+def test_resolve_gateway_max_iterations_reloads_before_reading_stale_env(
+    tmp_path: Path, monkeypatch
+) -> None:
+    hermes_home = tmp_path / ".hermes"
+    hermes_home.mkdir()
+    (hermes_home / "config.yaml").write_text(
+        yaml.safe_dump({"agent": {"max_turns": 150}}),
+        encoding="utf-8",
+    )
+    (hermes_home / ".env").write_text(
+        "HERMES_MAX_ITERATIONS=90\nOPENROUTER_API_KEY=fresh-key\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(gateway_run, "_hermes_home", hermes_home)
+    monkeypatch.setenv("HERMES_MAX_ITERATIONS", "90")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+
+    assert gateway_run._resolve_gateway_max_iterations() == 150
+    assert os.environ["OPENROUTER_API_KEY"] == "fresh-key"
+    assert os.environ["HERMES_MAX_ITERATIONS"] == "150"
